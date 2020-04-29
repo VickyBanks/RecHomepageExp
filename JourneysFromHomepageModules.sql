@@ -272,9 +272,9 @@ FROM central_insights_sandbox.vb_exp_deeplinks_temp
 WHERE row_count = 1;
 
 ------------- Join all the different types of click to content into one table -------------
-DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_all_content_clicks;
 -- Regular clicks
-CREATE TABLE central_insights_sandbox.vb_exp_content_clicks
+CREATE TABLE central_insights_sandbox.vb_exp_all_content_clicks
 AS
 SELECT dt,
        unique_visitor_cookie_id,
@@ -288,7 +288,7 @@ SELECT dt,
 FROM central_insights_sandbox.vb_exp_content_clicks;
 
 -- Autoplay
-INSERT INTO central_insights_sandbox.vb_exp_content_clicks
+INSERT INTO central_insights_sandbox.vb_exp_all_content_clicks
 SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
@@ -301,7 +301,7 @@ SELECT dt,
 FROM central_insights_sandbox.vb_exp_autoplay_clicks;
 
 -- Web autoplay
-INSERT INTO central_insights_sandbox.vb_exp_content_clicks
+INSERT INTO central_insights_sandbox.vb_exp_all_content_clicks
 SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
@@ -314,7 +314,7 @@ SELECT dt,
 FROM central_insights_sandbox.vb_exp_autoplay_web_complete;
 
 -- Deeplinks
-INSERT INTO central_insights_sandbox.vb_exp_content_clicks
+INSERT INTO central_insights_sandbox.vb_exp_all_content_clicks
 SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
@@ -327,6 +327,35 @@ SELECT dt,
 FROM central_insights_sandbox.vb_exp_deeplinks;
 
 
+SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks ORDER BY visit_id, event_position
+LIMIT 100;
+
+
+-------------------------------------- Select all the ixpl-start impressions and link them back to the click to content -----------------------------------------------------------------
+
+-- For every dt/user/visit combination find all the ixpl start labels from the user group
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_play_starts;
+CREATE TABLE central_insights_sandbox.vb_exp_play_starts AS
+SELECT DISTINCT a.dt,
+                a.unique_visitor_cookie_id,
+                b.bbc_hid3,
+                a.visit_id,
+                a.event_position,
+                a.container,
+                a.attribute,
+                a.placement,
+                a.result AS content_id,
+                c.series_id,
+                c.brand_id
+FROM s3_audience.publisher a
+         JOIN central_insights_sandbox.vb_rec_exp_ids_hid  b
+              ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.dt = b.dt AND a.visit_id = b.visit_id
+JOIN central_insights_sandbox.vb_vmb_temp c ON a.content_id = c.episode_id
+WHERE a.publisher_impressions = 1
+  AND a.attribute = 'iplxp-ep-started'
+  AND a.destination = 'PS_IPLAYER'
+  AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
 
 
 
