@@ -150,6 +150,187 @@ GROUP BY dt, platform,container, age_range
 
 ----------------------------------------  Linking the click to content to the episode start ----------------------------------------
 
+-- Need to identify all the clicks to content and link them to the ixpl-start flag.
+-- Need all the clicks, not just from homepage, to make sure a click from homepage is not incorrectly linked to (for exmaple) content autoplaying.
+-- Need to eliminate clicks from the TLEO because these are a middle step from homepage.
+
+-- All standard clicks
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
+CREATE TABLE central_insights_sandbox.vb_exp_content_clicks AS
+SELECT DISTINCT a.dt,
+                a.unique_visitor_cookie_id,
+                b.bbc_hid3,
+                a.visit_id,
+                a.event_position,
+                a.container,
+                a.attribute,
+                a.placement,
+                a.result
+FROM s3_audience.publisher a
+         JOIN central_insights_sandbox.vb_rec_exp_ids_hid b -- this is to bring in only those visits in our exp group
+              ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                 b.visit_id = a.visit_id
+WHERE (a.attribute LIKE 'content-item%' OR a.attribute LIKE 'start-watching%' OR a.attribute = 'resume' OR
+       a.attribute = 'next-episode' OR a.attribute = 'search-result-episode~click' OR a.attribute = 'page-section-related~select')
+  AND a.publisher_clicks = 1
+  AND a.destination = b.destination
+  AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+AND a.placement NOT ILIKE '%tleo%' -- we need homepage-episode, ignoring any TLEO middle step
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
+
+
+
+-- Clicks can come from the autoplay system starting an episode
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_clicks;
+CREATE TABLE central_insights_sandbox.vb_exp_autoplay_clicks AS
+SELECT DISTINCT a.dt,
+                a.unique_visitor_cookie_id,
+                b.bbc_hid3,
+                a.visit_id,
+                a.event_position,
+                a.container,
+                a.attribute,
+                a.placement,
+                CASE
+                    WHEN left(right(a.placement, 13), 8) SIMILAR TO '%[0-9]%'
+                        THEN left(right(a.placement, 13), 8) -- if this contains a number then its an ep id, if not make blank
+                    ELSE 'none' END AS current_ep_id,
+                a.result            AS next_ep_id
+FROM s3_audience.publisher a
+         JOIN central_insights_sandbox.vb_rec_exp_ids_hid b -- this is to bring in only those visits in our journey table
+              ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                 b.visit_id = a.visit_id
+WHERE (a.attribute LIKE '%squeeze-auto-play%' OR a.attribute LIKE '%squeeze-play%' OR a.attribute LIKE '%end-play%' OR
+       a.attribute LIKE '%end-auto-play%')
+  AND a.publisher_clicks = 1
+  AND a.destination = b.destination
+  AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
+
+-- The autoplay on web doesn't currently send any click. It just shows the countdown to autoplay completing as an impression.
+-- Include this as a click for now until better tracking is in place
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_web_complete;
+CREATE TABLE central_insights_sandbox.vb_exp_autoplay_web_complete AS
+SELECT DISTINCT a.dt,
+                a.unique_visitor_cookie_id,
+                b.bbc_hid3,
+                a.visit_id,
+                a.event_position,
+                a.container,
+                a.attribute,
+                a.placement,
+                CASE
+                    WHEN left(right(a.placement, 13), 8) SIMILAR TO '%[0-9]%'
+                        THEN left(right(a.placement, 13), 8) -- if this contains a number then its an ep id, if not make blank
+                    ELSE 'none' END AS current_ep_id,
+                a.result            AS next_ep_id
+FROM s3_audience.publisher a
+         JOIN central_insights_sandbox.vb_rec_exp_ids_hid  b -- this is to bring in only those visits in our journey table
+              ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                 b.visit_id = a.visit_id
+WHERE a.attribute LIKE '%onward-journey-panel~complete%'
+  AND a.publisher_impressions = 1
+  AND a.destination = b.destination
+  AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
+
+
+-- Deep links into content from off platform. This needs to regex to identify the content pid the link took users too.
+-- Not all pids can be identified and not all links go direct to content.
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_deeplinks_temp;
+CREATE TABLE central_insights_sandbox.vb_exp_deeplinks_temp AS
+SELECT DISTINCT a.dt,
+                a.unique_visitor_cookie_id,
+                b.bbc_hid3,
+                a.visit_id,
+                a.event_position,
+                a.url,
+                CASE
+                    WHEN a.url ILIKE '%/playback%' THEN SUBSTRING(
+                            REVERSE(regexp_substr(REVERSE(a.url), '[[:alnum:]]{6}[0-9]{1}[pbwnmlc]{1}/')), 2,
+                            8) -- Need the final instance of the phrase'/playback' to get the episode ID so reverse url so that it's now first.
+                    ELSE 'unknown' END                                                                   AS click_result,
+                row_number()
+                over (PARTITION BY a.dt,a.unique_visitor_cookie_id,a.visit_id ORDER BY a.event_position) AS row_count
+FROM s3_audience.events a
+         JOIN central_insights_sandbox.vb_rec_exp_ids_hid  b -- this is to bring in only those visits in our journey table
+              ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                 b.visit_id = a.visit_id
+WHERE a.destination = b.destination
+  AND a.url LIKE '%deeplink%'
+  AND a.url IS NOT NULL
+  AND a.destination = b.destination
+  AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
+
+-- Take only the first deep link instance
+-- Later this will be joined to VMB to ensure link takes directly to a content page.
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_deeplinks;
+CREATE TABLE central_insights_sandbox.vb_exp_deeplinks AS
+SELECT *
+FROM central_insights_sandbox.vb_exp_deeplinks_temp
+WHERE row_count = 1;
+
+------------- Join all the different types of click to content into one table -------------
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
+-- Regular clicks
+CREATE TABLE central_insights_sandbox.vb_exp_content_clicks
+AS
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       event_position,
+       container,
+       attribute,
+       placement,
+       result AS click_destination_id
+FROM central_insights_sandbox.vb_exp_content_clicks;
+
+-- Autoplay
+INSERT INTO central_insights_sandbox.vb_exp_content_clicks
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       event_position,
+       container,
+       attribute,
+       placement,
+       next_ep_id AS click_destination_id
+FROM central_insights_sandbox.vb_exp_autoplay_clicks;
+
+-- Web autoplay
+INSERT INTO central_insights_sandbox.vb_exp_content_clicks
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       event_position,
+       container,
+       attribute,
+       placement,
+       next_ep_id AS click_destination_id
+FROM central_insights_sandbox.vb_exp_autoplay_web_complete;
+
+-- Deeplinks
+INSERT INTO central_insights_sandbox.vb_exp_content_clicks
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       event_position,
+       CAST('deeplink' AS varchar) AS container,
+       CAST('deeplink' AS varchar) AS attribute,
+       CAST('deeplink' AS varchar) AS placement,
+       click_result                AS click_destination_id
+FROM central_insights_sandbox.vb_exp_deeplinks;
+
+
+
+
+
+
 
 
 
