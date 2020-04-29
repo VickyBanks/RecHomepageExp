@@ -1,44 +1,72 @@
-SELECT DISTINCT a.user_experience
+--- Script to look at journeys to playback from the recomended section on homepage for the experiment iplxp_irex1_model1_1
+
+-- Initially set a date range table for ease of changing later
+DROP TABLE IF EXISTS central_insights_sandbox.vb_homepage_rec_date_range;
+create table central_insights_sandbox.vb_homepage_rec_date_range (
+    min_date varchar(20),
+    max_date varchar(20));
+insert into central_insights_sandbox.vb_homepage_rec_date_range values
+('20200406','20200406');
+
+
+-----------------------------------------  Identify the user group -----------------------------
+-- Identify the users and visits within the exp group.
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
+SELECT DISTINCT b.*,
+                CASE
+                    WHEN a.user_experience = 'REC=think-personal-iplayer-homepg-tvforyou' THEN 'homepg-tvforyou'
+                    WHEN a.user_experience = 'REC=think-personal-iplayer-homepg-tvforyou-ndm' THEN 'homepg-tvforyou-ndm'
+                    WHEN a.user_experience = 'REC=think-personal-iplayer-player-tvforyou' THEN 'player-tvforyou'
+                    ELSE 'unknown'
+                    END AS exp_subgroup
 FROM s3_audience.publisher a
-         JOIN (SELECT unique_visitor_cookie_id, dt, visit_id, destination
+         JOIN (SELECT destination,
+                      dt,
+                      unique_visitor_cookie_id,
+                      visit_id,
+                      CASE
+                          WHEN metadata iLIKE '%iplayer::bigscreen-html%' THEN 'bigscreen'
+                          WHEN metadata ILIKE '%responsive::iplayer%' THEN 'web'
+                          END AS platform,
+                      CASE
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_1' THEN 'variation_1'
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_2' THEN 'variation_2'
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::control' THEN 'control'
+                          ELSE 'unknown'
+                          END AS exp_group
                FROM s3_audience.publisher
-               WHERE dt BETWEEN 20200406 AND 20200408
+               WHERE dt between (SELECT min_date
+                                 FROM central_insights_sandbox.vb_homepage_rec_date_range)
+                   AND (SELECT max_date
+                        FROM central_insights_sandbox.vb_homepage_rec_date_range)
                  AND user_experience ilike '%iplxp_irex1_model1_1%'
                  AND destination = 'PS_IPLAYER'
+                 AND (metadata ILIKE '%iplayer::bigscreen-html%'
+                   OR metadata ILIKE '%responsive::iplayer%')
                LIMIT 1000) b
               ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id and a.dt = b.dt AND
                  a.destination = b.destination
-WHERE a.user_experience ilike '%REC=think-%'
-ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id, a.event_position;
+WHERE a.destination = 'PS_IPLAYER'
+  AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
+                                                                                                   FROM central_insights_sandbox.vb_homepage_rec_date_range)
+  AND (a.user_experience ilike '%REC=think-personal-iplayer-homepg-tvforyou%' OR
+       a.user_experience ilike '%REC=think-personal-iplayer-homepg-tvforyou-ndm%' OR
+       a.user_experience ilike '%REC=think-personal-iplayer-player-tvforyou%')
+  AND (a.metadata ILIKE '%iplayer::bigscreen-html%' OR a.metadata ILIKE '%responsive::iplayer%')
+ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
+
 -- Users can come in with 'cold' recomendations where we know nothing about them so just guess. The field user_experience ilike '%REC=think-%' gives the label to show if they're cold or not.
 -- Need to keep and group by these at the end
-    -- user_experience
+    -- user_experience =
     -- REC=think-personal-iplayer-homepg-tvforyou
     -- REC=think-personal-iplayer-homepg-tvforyou-ndm
     -- REC=think-personal-iplayer-player-tvforyou
--- This is send at a different time to to user_experience ilike '%iplxp_irex1_model1_1%' label.
+-- This is sent at a different time to to user_experience ilike '%iplxp_irex1_model1_1%' label so need both.
 
+SELECT * FROM central_ins
+ights_sandbox.vb_rec_exp_ids LIMIT 100;
 
---- Get sample of users
-DROP TABLE IF EXISTS vb_expIDs_temp;
-CREATE TABLE vb_expIDs_temp AS
-SELECT DISTINCT dt,
-                unique_visitor_cookie_id,
-                visit_id,
-                 CASE
-                    WHEN metadata iLIKE '%iplayer::bigscreen-html%' THEN 'bigscreen'
-                    WHEN metadata ILIKE '%responsive::iplayer%' THEN 'web'
-                    END                  AS platform
-
-                --CASE
-                --    WHEN user_experience LIKE 'EXP=iplxp_ibl32_sort_featured::control' THEN 'control'
-                --    WHEN user_experience LIKE 'EXP=iplxp_ibl32_sort_featured::test'
-                --        THEN 'test' END AS user_experience
-FROM s3_audience.publisher
-WHERE --user_experience LIKE '%iplxp_ibl32_sort_featured::%' AND
-    (metadata LIKE '%iplayer::bigscreen-html%' OR metadata LIKE '%responsive::iplayer%')
-  AND dt between '20200319' AND '20200326'
-  AND destination = 'PS_IPLAYER';
 
 -- Add age and hid into sample IDs as user's are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
