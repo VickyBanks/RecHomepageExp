@@ -6,7 +6,7 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200406','20200406');
+('20200406','20200411');
 
 
 -----------------------------------------  Identify the user group -----------------------------
@@ -517,12 +517,123 @@ SELECT click_container, content_attribute, count(visit_id) AS num_clicks
 FROM central_insights_sandbox.vb_exp_valid_starts
     WHERE click_placement = 'iplayer.tv.page' --homepage
     GROUP BY 1,2;
+
+
+
+---------------------------------------------------  Add in watched flags and validate them -------------------------------------------------
+
+-- For every dt/user/visit combination find all the ixpl watched labels
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_play_watched;
+CREATE TABLE central_insights_sandbox.vb_exp_play_watched AS
+SELECT DISTINCT a.dt,
+                a.unique_visitor_cookie_id,
+                b.bbc_hid3,
+                a.visit_id,
+                a.event_position,
+                a.container,
+                a.attribute,
+                a.placement,
+                a.result AS content_id
+FROM s3_audience.publisher a
+         JOIN central_insights_sandbox.vb_rec_exp_ids_hid b
+              ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.dt = b.dt AND a.visit_id = b.visit_id
+WHERE a.publisher_impressions = 1
+  AND a.attribute = 'iplxp-ep-watched'
+  AND a.destination = 'PS_IPLAYER'
+  AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
+
+
+-- Join the watch events to the validated start events, ensuring the same content_id
+-- Deduplcate to make sure one watched flag isn't joined to two start flag
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_starts_and_watched;
+CREATE TABLE central_insights_sandbox.vb_exp_starts_and_watched AS
+SELECT a.*,
+       ISNULL(b.attribute, 'no-watched-flag') AS content_attribute2,
+       b.event_position                       AS content_watched_event_position,
+       b.content_id                           AS watched_content_id,
+       CASE
+           WHEN b.event_position Is NOT NULL THEN CAST(b.event_position - a.content_start_event_position AS integer)
+           ELSE 0 END                         AS start_watched_diff,
+       CASE
+           WHEN content_attribute2 = 'iplxp-ep-watched' THEN row_number()
+                                                             over (PARTITION BY a.dt,a.unique_visitor_cookie_id,a.bbc_hid3, a.visit_id,a.content_start_event_position ORDER BY start_watched_diff)
+           ELSE 1 END                         AS duplicate_count
+FROM central_insights_sandbox.vb_exp_valid_starts a
+         LEFT JOIN central_insights_sandbox.vb_exp_play_watched b
+                   ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.dt = b.dt AND
+                      a.visit_id = b.visit_id AND a.content_id = b.content_id
+WHERE start_watched_diff >= 0
+ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.click_event_position;
+
+
+-- Prevents any watched flag from being joined to multiple starts
+-- If more than one start occurs for an ID this removes the one not matched to the watched. So those will need to be added back in to ensure one start without a watched and one with.
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
+CREATE TABLE central_insights_sandbox.vb_exp_valid_watched AS
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       click_event_position,
+       click_container,
+       click_placement,
+       content_placement,
+       content_id,
+       content_start_event_position,
+       content_watched_event_position,
+       content_attribute  AS start_flag,
+       content_attribute2 AS watched_flag
+FROM central_insights_sandbox.vb_exp_starts_and_watched
+WHERE duplicate_count = 1;
+
+
+INSERT INTO central_insights_sandbox.vb_exp_valid_watched
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       click_event_position,
+       click_container,
+       click_placement,
+       content_placement,
+       content_id,
+       content_start_event_position,
+       content_watched_event_position
+FROM (
+         SELECT a.*,b.content_watched_event_position, b.visit_id as missing_flag
+         FROM central_insights_sandbox.vb_exp_valid_starts a
+                  LEFT JOIN central_insights_sandbox.vb_exp_valid_watched b
+                            ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                               a.visit_id = b.visit_id AND
+                               a.click_event_position = b.click_event_position
+     )
+WHERE missing_flag ISNULL;
+
+
+UPDATE central_insights_sandbox.vb_exp_valid_watched
+SET start_flag = (CASE
+                      WHEN start_flag IS NULL THEN 'no-start-flag'
+                      ELSE start_flag END);
+UPDATE central_insights_sandbox.vb_exp_valid_watched
+SET watched_flag = (CASE
+                        WHEN watched_flag IS NULL THEN 'no-watched-flag'
+                        ELSE watched_flag END);
+
+
+
+---- Look at results
+
+SELECT dt, click_container, start_flag,watched_flag, count(visit_id) AS num_clicks
+FROM central_insights_sandbox.vb_exp_valid_watched
+    WHERE click_placement = 'iplayer.tv.page' --homepage
+    GROUP BY 1,2,3,4;
 ---------------------------------------------------------------------------------------------------------------------------------
 
 
 
 
-
+/*
 -- Select all publisher data for these users
 DROP TABLE IF EXISTS vb_rec_exp_data;
 CREATE TABLE vb_rec_exp_data AS
