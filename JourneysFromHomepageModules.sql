@@ -43,8 +43,7 @@ FROM s3_audience.publisher a
                  AND user_experience ilike '%iplxp_irex1_model1_1%'
                  AND destination = 'PS_IPLAYER'
                  AND (metadata ILIKE '%iplayer::bigscreen-html%'
-                   OR metadata ILIKE '%responsive::iplayer%')
-               LIMIT 1000) b
+                   OR metadata ILIKE '%responsive::iplayer%')) b
               ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id and a.dt = b.dt AND
                  a.destination = b.destination
 WHERE a.destination = 'PS_IPLAYER'
@@ -64,69 +63,65 @@ ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
     -- REC=think-personal-iplayer-player-tvforyou
 -- This is sent at a different time to to user_experience ilike '%iplxp_irex1_model1_1%' label so need both.
 
-SELECT * FROM central_ins
-ights_sandbox.vb_rec_exp_ids LIMIT 100;
+SELECT * FROM central_insights_sandbox.vb_rec_exp_ids LIMIT 100;
 
 
 -- Add age and hid into sample IDs as user's are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
-DROP TABLE IF EXISTS vb_expIDs;
-CREATE TABLE vb_expIDs AS
-SELECT DISTINCT id.unique_visitor_cookie_id,
-                id.visit_id,
-                id.dt,
-                id.platform,
-                --id.user_experience,
-                p.bbc_hid3,
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid  AS
+SELECT DISTINCT a.*,
+                c.bbc_hid3,
                 CASE
-                    WHEN p.age >= 35 THEN '35+'
-                    WHEN p.age <= 10 THEN 'under 10'
-                    WHEN p.age >= 11 AND p.age <= 15 THEN '11-15'
-                    WHEN p.age >= 16 AND p.age <= 24 THEN '16-24'
-                    WHEN p.age >= 25 AND p.age <= 34 then '25-34'
+                    WHEN c.age >= 35 THEN '35+'
+                    WHEN c.age <= 10 THEN 'under 10'
+                    WHEN c.age >= 11 AND c.age <= 15 THEN '11-15'
+                    WHEN c.age >= 16 AND c.age <= 24 THEN '16-24'
+                    WHEN c.age >= 25 AND c.age <= 34 then '25-34'
                     ELSE 'unknown'
                     END AS age_range
-FROM vb_expIDs_temp id
-         JOIN (SELECT DISTINCT unique_visitor_cookie_id, visit_id, audience_id, dt
+FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
+         JOIN (SELECT DISTINCT dt, unique_visitor_cookie_id, visit_id, audience_id, destination
                FROM s3_audience.visits
-               WHERE destination = 'PS_IPLAYER'
-                 AND dt between '20200319' AND '20200326') v
-              ON id.unique_visitor_cookie_id = v.unique_visitor_cookie_id AND id.visit_id = v.visit_id AND id.dt = v.dt
-         JOIN prez.id_profile p ON v.audience_id = p.bbc_hid3
-ORDER BY id.unique_visitor_cookie_id, p.bbc_hid3
+               WHERE destination = 'PS_IPLAYER' AND dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
+                                                                                                   FROM central_insights_sandbox.vb_homepage_rec_date_range)) b -- get the audience_id
+              ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id AND a.dt = b.dt AND a.destination = b.destination
+         JOIN prez.id_profile c ON b.audience_id = c.bbc_hid3
+ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
 
---- Are any visits lost when adding in age? Difference = 1.1 mil (for 2020-03-25) Non signed in people?
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM vb_expIDs_temp); -- 5,351,874
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM vb_expIDs); -- 4,250,857
+------------------------------------------ Checks - Are any visits lost when adding in age? (test numbers for 2020-04-06)-------------------------------------------------
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 16,797
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --16,446
 --How many UV are lost
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM vb_expIDs_temp); -- 4,002,444
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM vb_expIDs); -- 3,188,489
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 16,465
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --16,127
 
 --by platform
-SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM vb_expIDs_temp) GROUP BY platform;
+SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM central_insights_sandbox.vb_rec_exp_ids) GROUP BY platform;
 --platform,count
--- web,  1,524,632
--- bigscreen, 3,827,307
+-- web, 9,598
+-- bigscreen, 7,199
 
-SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM vb_expIDs) GROUP BY platform;
+SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid) GROUP BY platform;
 --platform,count
--- web,   1,089,276
--- bigscreen,  3,161,633
-
-
+-- web, 9,397
+-- bigscreen, 7,055
 
 -- How many hids have more than one age range? SHOULD be as close to zero as possible
 SELECT COUNT(*)
 FROM (SELECT DISTINCT bbc_hid3, count(DISTINCT age_range) AS num_age_ranges
-      FROM vb_expIDs
+      FROM central_insights_sandbox.vb_rec_exp_ids_hid
       GROUP BY bbc_hid3
       HAVING count(DISTINCT age_range) > 1); --ZERO!!
+---------------------------------------------------------------------------------------------------------------------------------------------------
 
 
--- Get all impressions to the module as a whole
-DROP TABLE IF EXISTS vb_module_impressions;
-CREATE TABLE vb_module_impressions AS
+
+------------------------------------------------------- Impressions - web only--------------------------------------------------------------------------------------------
+-- Get all impressions to the each module for this exp group
+DROP TABLE IF EXISTS central_insights_sandbox.vb_module_impressions;
+CREATE TABLE central_insights_sandbox.vb_module_impressions AS
 SELECT DISTINCT b.dt,
                 b.unique_visitor_cookie_id,
                 b.bbc_hid3,
@@ -137,24 +132,25 @@ SELECT DISTINCT b.dt,
                     WHEN a.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked'
                     ELSE a.container END AS container
 FROM s3_audience.publisher a
-        RIGHT JOIN vb_expIDs b ON a.dt = b.dt
+        JOIN central_insights_sandbox.vb_rec_exp_ids_hid b ON a.destination = b.destination AND a.dt = b.dt
     AND a.visit_id = b.visit_id AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id
 WHERE a.destination = 'PS_IPLAYER'
-  AND (a.dt between '20200319' AND '20200326')
+  AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+      AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
   AND a.publisher_impressions = 1
-  AND placement = 'iplayer.tv.page';
-
-SELECT * FROM vb_module_impressions ORDER BY unique_visitor_cookie_id,
-                bbc_hid3 limit 50 ;
-SELECT * FROM s3_audience.publisher WHERE destination = 'PS_IPLAYER' LIMIT 3;
-
-
+  AND placement = 'iplayer.tv.page'--homepage only
+  AND b.platform = 'web'
+;
 
 -- Counts - all modules
 SELECT dt, platform, container, age_range, count(*) AS count_module_views
-FROM vb_module_impressions
+FROM central_insights_sandbox.vb_module_impressions
 GROUP BY dt, platform,container, age_range
 ;
+
+----------------------------------------  Linking the click to content to the episode start ----------------------------------------
+
+
 
 
 -- Select all publisher data for these users
