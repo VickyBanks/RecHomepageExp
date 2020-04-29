@@ -162,7 +162,9 @@ SELECT DISTINCT a.dt,
                 b.bbc_hid3,
                 a.visit_id,
                 a.event_position,
-                a.container,
+                CASE
+                    WHEN a.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked'
+                    ELSE a.container END AS container,
                 a.attribute,
                 a.placement,
                 a.result
@@ -188,7 +190,9 @@ SELECT DISTINCT a.dt,
                 b.bbc_hid3,
                 a.visit_id,
                 a.event_position,
-                a.container,
+                CASE
+                    WHEN a.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked'
+                    ELSE a.container END AS container,
                 a.attribute,
                 a.placement,
                 CASE
@@ -201,7 +205,7 @@ FROM s3_audience.publisher a
               ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
                  b.visit_id = a.visit_id
 WHERE (a.attribute LIKE '%squeeze-auto-play%' OR a.attribute LIKE '%squeeze-play%' OR a.attribute LIKE '%end-play%' OR
-       a.attribute LIKE '%end-auto-play%')
+       a.attribute LIKE '%end-auto-play%' OR a.attribute LIKE '%select-play%')
   AND a.publisher_clicks = 1
   AND a.destination = b.destination
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
@@ -216,7 +220,9 @@ SELECT DISTINCT a.dt,
                 b.bbc_hid3,
                 a.visit_id,
                 a.event_position,
-                a.container,
+                CASE
+                    WHEN a.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked'
+                    ELSE a.container END AS container,
                 a.attribute,
                 a.placement,
                 CASE
@@ -327,8 +333,7 @@ SELECT dt,
 FROM central_insights_sandbox.vb_exp_deeplinks;
 
 
-SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks ORDER BY visit_id, event_position
-LIMIT 100;
+--SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks ORDER BY visit_id, event_position LIMIT 100;
 
 
 -------------------------------------- Select all the ixpl-start impressions and link them back to the click to content -----------------------------------------------------------------
@@ -345,19 +350,174 @@ SELECT DISTINCT a.dt,
                 a.attribute,
                 a.placement,
                 a.result AS content_id,
-                c.series_id,
-                c.brand_id
+                ISNULL(c.series_id,'unknown') AS series_id,
+                ISNULL(c.brand_id, 'unknown') AS brand_id
 FROM s3_audience.publisher a
          JOIN central_insights_sandbox.vb_rec_exp_ids_hid  b
               ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.dt = b.dt AND a.visit_id = b.visit_id
-JOIN central_insights_sandbox.vb_vmb_temp c ON a.content_id = c.episode_id
+LEFT JOIN central_insights_sandbox.vb_vmb_temp c ON a.result = c.episode_id
 WHERE a.publisher_impressions = 1
   AND a.attribute = 'iplxp-ep-started'
   AND a.destination = 'PS_IPLAYER'
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
 
+--SELECT visit_id, COUNT(*) FROM central_insights_sandbox.vb_exp_play_starts GROUP BY visit_id; --70,228 - seems high
+--SELECT * FROM central_insights_sandbox.vb_exp_play_starts WHERE visit_id = 18960542 ORDER BY visit_id, event_position;
 
+-- Join clicks and starts into one master table. (some clicks will not be to a content page i.e homepage > TLEO and will be dealt with later)
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_and_starts_temp;
+-- Add in start events
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_and_starts_temp AS
+SELECT *
+FROM central_insights_sandbox.vb_exp_play_starts;
+
+-- Add in click events
+INSERT INTO central_insights_sandbox.vb_exp_clicks_and_starts_temp
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       event_position,
+       container,
+       attribute,
+       placement,
+       click_destination_id AS content_id
+FROM central_insights_sandbox.vb_exp_all_content_clicks;
+
+-- Add in row number for each visit
+-- This is used to match a content click to a start if the click carried no ID (i.e with categories or channels pages)
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_and_starts;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_and_starts AS
+SELECT *, row_number() over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, visit_id ORDER BY event_position)
+FROM central_insights_sandbox.vb_exp_clicks_and_starts_temp
+ORDER BY dt, unique_visitor_cookie_id, bbc_hid3, visit_id, event_position;
+
+
+-- Join the table back on itself to match the content click to the ixpl start by the content_id.
+-- For categories and channels the click ID is often unknown so need to create one master table so the click event before ixpl start can be taken in these cases
+-- If that's ever fixed then can simply join play starts with clicks
+-- The clicks and start flags are split into two temp tables for ease of code. Can't just join the two original tables because we need the row count for when the content_id is unknown.
+DROP TABLE IF EXISTS vb_temp_starts;
+DROP TABLE IF EXISTS vb_temp_clicks;
+CREATE TEMP TABLE vb_temp_starts AS SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts WHERE attribute = 'iplxp-ep-started';
+CREATE TEMP TABLE vb_temp_clicks AS SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts WHERE attribute != 'iplxp-ep-started';
+
+--SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts WHERE visit_id = 14308991 OR visit_id = 21656571 OR visit_id = 23192602;
+
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_temp AS
+SELECT a.dt,
+       a.unique_visitor_cookie_id,
+       a.bbc_hid3,
+       a.visit_id,
+       a.event_position                                                                                            AS click_event_position,
+       a.container                                                                                                 AS click_container,
+       a.attribute                                                                                                 AS click_attibute,
+       a.placement                                                                                                 AS click_placement,
+       a.content_id                                                                                                AS click_id,
+       b.container                                                                                                 AS content_container,
+       ISNULL(b.attribute, 'no-start-flag')                                                                        AS content_attribute,
+       b.placement                                                                                                 AS content_placement,
+       b.content_id                                                                                                AS content_id,
+       b.event_position                                                                                            AS content_start_event_position,
+       CASE
+           WHEN b.event_position IS NOT NULL THEN CAST(b.event_position - a.event_position AS integer)
+           ELSE 0 END                                                                                              AS content_start_diff
+FROM vb_temp_clicks a
+         LEFT JOIN vb_temp_starts b
+                   ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                      a.visit_id = b.visit_id AND CASE
+                                                      WHEN a.content_id != 'unknown' AND a.content_id = b.content_id
+                                                          THEN a.content_id = b.content_id -- Check the content IDs match if possible
+                                                      WHEN a.content_id != 'unknown' AND
+                                                           a.content_id != b.content_id AND a.content_id = b.series_id
+                                                          THEN a.content_id = b.series_id -- see if the click's content id is actually a series
+                                                      WHEN a.content_id != 'unknown' AND
+                                                           a.content_id != b.content_id AND
+                                                           a.content_id != b.series_id AND a.content_id = b.brand_id
+                                                          THEN a.content_id = b.brand_id -- see if the click's content id is actually a series
+                                                      WHEN a.content_id = 'unknown'
+                                                          THEN a.row_number = b.row_number - 1 -- Click is row above start - if you can't check IDs or master brands, just link with row above (click is one above start)
+                          END
+WHERE content_start_diff >= 0 -- For the null cases with no matching start flag the value given = 0.
+--AND (a.visit_id = 14308991 OR a.visit_id = 21656571 OR a.visit_id = 23192602);
+ORDER BY a.visit_id, a.event_position
+;
+
+
+-- Need to deduplicate as multiple clicks to one piece of content could only result one ixpl-start flag
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp AS
+SELECT *,
+       CASE
+           WHEN content_attribute = 'iplxp-ep-started' THEN row_number()
+                                                            over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, visit_id,click_event_position ORDER BY content_start_diff)
+           ELSE 1 END AS duplicate_count
+FROM central_insights_sandbox.vb_exp_clicks_linked_starts_temp
+ORDER BY dt, bbc_hid3, visit_id, content_start_event_position;
+
+
+-- Remove duplicates
+-- Values with no start flag need to be kept so they're given duplicate_count = 1
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid AS
+SELECT *
+FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp
+WHERE duplicate_count = 1;
+
+--SELECT * FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid  WHERE (visit_id = 2102182 OR visit_id = 2932254);
+
+-- The above ensures each start is only joined with one click, but there may be multiple clicks to the same content, with only one resulting in a start (start closest to click is chosen)
+-- These need to be joined back in as clicks that had no start
+INSERT INTO central_insights_sandbox.vb_exp_clicks_linked_starts_valid
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       event_position                       AS click_event_position,
+       container                            AS click_container,
+       attribute                            AS click_attribute,
+       placement                            AS click_placement,
+       content_id                           AS click_episode_id
+FROM (SELECT a.*, b.visit_id as missing_flag
+      FROM vb_temp_clicks a
+               LEFT JOIN central_insights_sandbox.vb_exp_clicks_linked_starts_valid b
+                         ON a.dt = b.dt AND a.bbc_hid3 = b.bbc_hid3 AND a.visit_id = b.visit_id AND
+                            a.event_position = b.click_event_position)
+WHERE missing_flag IS NULL;
+
+
+-- Define value if there's no start
+UPDATE central_insights_sandbox.vb_exp_clicks_linked_starts_valid
+SET content_attribute = (CASE
+                             WHEN content_attribute IS NULL THEN 'no-start-flag'
+                             ELSE content_attribute END);
+
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_starts;
+CREATE TABLE central_insights_sandbox.vb_exp_valid_starts AS
+SELECT dt,
+       unique_visitor_cookie_id,
+       bbc_hid3,
+       visit_id,
+       click_attibute,
+       click_container,
+       click_placement,
+       click_id,
+       click_event_position,
+       content_attribute,
+       content_placement,
+       content_id,
+       content_start_event_position
+FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
+
+--SELECT * FROM central_insights_sandbox.vb_exp_valid_starts limit 5;
+
+SELECT click_container, content_attribute, count(visit_id) AS num_clicks
+FROM central_insights_sandbox.vb_exp_valid_starts
+    WHERE click_placement = 'iplayer.tv.page' --homepage
+    GROUP BY 1,2;
+---------------------------------------------------------------------------------------------------------------------------------
 
 
 
