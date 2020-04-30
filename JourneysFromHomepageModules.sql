@@ -8,16 +8,20 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
 ('202000427','20200427');
 
+SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
 
 -----------------------------------------  Identify the user group -----------------------------
+
 -- Identify the users and visits within the exp group.
+-- Users send one flag for the experimental variant and another for which think analytics bucket they're in. Both are needed.
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_ids ;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
 SELECT DISTINCT b.*,
-                a.user_experience  AS exp_subgroup
+                a.user_experience  AS exp_subgroup -- for the visits in the exp, gives what rec they've got from think analytics
 FROM s3_audience.publisher a
-         JOIN (SELECT destination,
+         RIGHT JOIN (SELECT destination, --gives all the visits in the experiment
                       dt,
                       unique_visitor_cookie_id,
                       visit_id,
@@ -32,10 +36,8 @@ FROM s3_audience.publisher a
                           ELSE 'unknown'
                           END AS exp_group
                FROM s3_audience.publisher
-               WHERE dt between (SELECT min_date
-                                 FROM central_insights_sandbox.vb_homepage_rec_date_range)
-                   AND (SELECT max_date
-                        FROM central_insights_sandbox.vb_homepage_rec_date_range)
+               WHERE dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+                   AND (SELECT max_date  FROM central_insights_sandbox.vb_homepage_rec_date_range)
                  AND user_experience ilike '%iplxp_irex1_model1_1%'
                  AND destination = 'PS_IPLAYER'
                  AND (metadata ILIKE '%iplayer::bigscreen-html%'
@@ -43,20 +45,11 @@ FROM s3_audience.publisher a
               ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id and a.dt = b.dt AND
                  a.destination = b.destination
 WHERE a.destination = 'PS_IPLAYER'
-  AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
-                                                                                                   FROM central_insights_sandbox.vb_homepage_rec_date_range)
+  AND (user_experience ILIKE '%REC=think%' OR user_experience ILIKE 'REC=irex%') --find out what think group they're in, or the in house group
+  AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
   AND (a.metadata ILIKE '%iplayer::bigscreen-html%' OR a.metadata ILIKE '%responsive::iplayer%')
 ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
 
--- Users can come in with 'cold' recomendations where we know nothing about them so just guess. The field user_experience ilike '%REC=think-%' gives the label to show if they're cold or not.
--- Need to keep and group by these at the end
-    -- user_experience =
-    -- REC=think-personal-iplayer-homepg-tvforyou
-    -- REC=think-personal-iplayer-homepg-tvforyou-ndm
-    -- REC=think-personal-iplayer-player-tvforyou
--- This is sent at a different time to to user_experience ilike '%iplxp_irex1_model1_1%' label so need both.
-
-SELECT * FROM central_insights_sandbox.vb_rec_exp_ids LIMIT 100;
 
 
 -- Add age and hid into sample IDs as user's are categorised based on hid not UV.
@@ -82,24 +75,47 @@ FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
          JOIN prez.id_profile c ON b.audience_id = c.bbc_hid3
 ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
+-- Some visits end up sending two or three experiment flags. When the signed in user is switched.
+-- For 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
+-- These are removed.
+SELECT dt, num_groups, count(DISTINCT visit_id) AS num_visits
+FROM (SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
+      FROM central_insights_sandbox.vb_rec_exp_ids_hid
+      GROUP BY 1, 2, 3)
+GROUP BY 1,2;
 
------------------------------------------- Checks - Are any visits lost when adding in age? (test numbers for 2020-04-06)-------------------------------------------------
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 16,797
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --16,446
+DROP TABLE vb_result_multiple_exp_groups;
+CREATE TEMP TABLE vb_result_multiple_exp_groups AS
+    SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
+      FROM central_insights_sandbox.vb_rec_exp_ids_hid
+      GROUP BY 1, 2,3
+        HAVING num_groups >1;
+
+
+DELETE FROM central_insights_sandbox.vb_rec_exp_ids_hid
+WHERE bbc_hid3 IN (SELECT bbc_hid3 FROM vb_result_multiple_exp_groups)
+AND visit_id IN (SELECT visit_id FROM vb_result_multiple_exp_groups);
+
+
+------------------------------------------ Checks - Are any visits lost when adding in age? (test numbers for 2020-04-27)------------------------------------------------
+/*-- How many visits are lost?
+SELECT count(*) FROM vb_result_multiple_exp_groups WHERE num_groups !=1; -- 45,635 visits are lost by removing those with wo groups
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 7,833,679
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --7,656,493
 --How many UV are lost
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 16,465
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --16,127
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 7,420,193
+SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --7,270,261
 
 --by platform
 SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM central_insights_sandbox.vb_rec_exp_ids) GROUP BY platform;
 --platform,count
--- web, 9,598
--- bigscreen, 7,199
+-- web, 1,012,852
+-- bigscreen, 6,820,827
 
 SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid) GROUP BY platform;
 --platform,count
--- web, 9,397
--- bigscreen, 7,055
+-- web, 989,970
+-- bigscreen, 6,666,523
 
 -- How many hids have more than one age range? SHOULD be as close to zero as possible
 SELECT COUNT(*)
@@ -107,6 +123,8 @@ FROM (SELECT DISTINCT bbc_hid3, count(DISTINCT age_range) AS num_age_ranges
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
       GROUP BY bbc_hid3
       HAVING count(DISTINCT age_range) > 1); --ZERO!!
+
+ */
 ---------------------------------------------------------------------------------------------------------------------------------------------------
 
 
@@ -643,6 +661,8 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
 SELECT platform, exp_group, exp_subgroup, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 GROUP BY 1,2,3;
+
+SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
 
 SELECT dt,
        click_container,
