@@ -15,6 +15,56 @@ insert into central_insights_sandbox.vb_homepage_rec_date_range values
 
 -- Identify the users and visits within the exp group.
 -- Users send one flag for the experimental variant and another for which think analytics bucket they're in. Both are needed.
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_temp;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
+    SELECT DISTINCT destination, --gives all the visits in the experiment
+                      dt,
+                      unique_visitor_cookie_id,
+                      visit_id,
+                      CASE
+                          WHEN metadata iLIKE '%iplayer::bigscreen-html%' THEN 'bigscreen'
+                          WHEN metadata ILIKE '%responsive::iplayer%' THEN 'web'
+                          END AS platform,
+                      CASE
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_1' THEN 'variation_1'
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_2' THEN 'variation_2'
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::control' THEN 'control'
+                          ELSE 'unknown'
+                          END AS exp_group
+               FROM s3_audience.publisher
+               WHERE dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+                   AND (SELECT max_date  FROM central_insights_sandbox.vb_homepage_rec_date_range)
+                 AND user_experience ilike '%iplxp_irex1_model1_1%'
+                 AND destination = 'PS_IPLAYER'
+                 AND (metadata ILIKE '%iplayer::bigscreen-html%'
+                   OR metadata ILIKE '%responsive::iplayer%');
+
+--SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp LIMIT 20;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
+    SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp;
+
+-- Issue with finding what think analytics group they're in. For now just keep the variant group.
+
+/*DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
+SELECT DISTINCT a.*,
+       ISNULL(b.user_experience, 'unknown') AS exp_subgroup
+FROM central_insights_sandbox.vb_rec_exp_ids_temp a
+         LEFT JOIN s3_audience.publisher b
+                   ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
+                      a.visit_id = b.visit_id
+WHERE b.destination = 'PS_IPLAYER'
+  AND (b.user_experience ILIKE '%REC=think%' OR
+       b.user_experience ILIKE 'REC=irex%') --find out what think group they're in, or the in house group
+  AND b.container = 'module-recommendations-recommended-for-you'
+  AND b.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
+                                                                                                   FROM central_insights_sandbox.vb_homepage_rec_date_range)
+  AND (b.metadata ILIKE '%iplayer::bigscreen-html%' OR b.metadata ILIKE '%responsive::iplayer%')
+
+SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids;
+SELECT * FROM central_insights_sandbox.vb_rec_exp_ids WHERE exp_subgroup ISNULL;
+
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
 SELECT DISTINCT b.*,
@@ -50,10 +100,11 @@ WHERE a.destination = 'PS_IPLAYER'
   AND (a.metadata ILIKE '%iplayer::bigscreen-html%' OR a.metadata ILIKE '%responsive::iplayer%')
 ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
 
-
+SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids;*/
 
 -- Add age and hid into sample IDs as user's are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
+SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid WHERE exp_subgroup ISNULL;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid  AS
 SELECT DISTINCT a.*,
@@ -95,7 +146,7 @@ UPDATE central_insights_sandbox.vb_rec_exp_ids_hid
 SET id_col = dt||bbc_hid3 || visit_id;
 
 -- Identify visits
-DROP TABLE vb_result_multiple_exp_groups;
+--DROP TABLE vb_result_multiple_exp_groups;
 CREATE TEMP TABLE vb_result_multiple_exp_groups AS
     SELECT CAST(dt || bbc_hid3|| visit_id AS varchar(400)) AS id_col, --create composite id col
            count(DISTINCT exp_group) AS num_groups
@@ -664,7 +715,7 @@ SELECT a.dt,
            ELSE 0 END as watched_flag,
        b.platform,
        b.exp_group,
-       b.exp_subgroup,
+       --b.exp_subgroup,
        b.age_range
 FROM central_insights_sandbox.vb_exp_valid_watched a
          LEFT JOIN central_insights_sandbox.vb_rec_exp_ids_hid b
@@ -672,9 +723,9 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
 ;
 
 ---- Look at results
-SELECT platform, exp_group, exp_subgroup, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
+SELECT platform, exp_group, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
-GROUP BY 1,2,3;
+GROUP BY 1,2;
 
 --SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
 
