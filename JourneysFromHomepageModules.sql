@@ -1,4 +1,4 @@
---- Script to look at journeys to playback from the recomended section on homepage for the experiment iplxp_irex1_model1_1
+--- Script to look at journeys to playback from the recommended section on homepage for the experiment iplxp_irex1_model1_1
 
 -- Initially set a date range table for ease of changing later
 DROP TABLE IF EXISTS central_insights_sandbox.vb_homepage_rec_date_range;
@@ -6,9 +6,9 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200427','20200427');
+('20200413','20200427');
 
-SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
+--SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
 
 -----------------------------------------  Identify the user group -----------------------------
@@ -74,27 +74,41 @@ FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
          JOIN prez.id_profile c ON b.audience_id = c.bbc_hid3
 ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
+
+ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
+ADD id_col varchar(400);
+
 -- Some visits end up sending two or three experiment flags. When the signed in user is switched.
 -- For 2020-04-06 to 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
--- These are removed.
+-- These need to be removed.
+
+-- Check how many there are
 SELECT dt, num_groups, count(DISTINCT visit_id) AS num_visits
 FROM (SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
       GROUP BY 1, 2, 3)
 GROUP BY 1,2;
 
+-- Add helper columns
+UPDATE central_insights_sandbox.vb_rec_exp_ids_hid
+SET id_col = dt||bbc_hid3 || visit_id;
+
+-- Identify visits
 DROP TABLE vb_result_multiple_exp_groups;
 CREATE TEMP TABLE vb_result_multiple_exp_groups AS
-    SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
+    SELECT CAST(dt || bbc_hid3|| visit_id AS varchar(400)) AS id_col, --create composite id col
+           count(DISTINCT exp_group) AS num_groups
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
-      GROUP BY 1, 2,3
+      GROUP BY 1
         HAVING num_groups >1;
 
-
+-- Remove visits
 DELETE FROM central_insights_sandbox.vb_rec_exp_ids_hid
-WHERE bbc_hid3 IN (SELECT bbc_hid3 FROM vb_result_multiple_exp_groups)
-AND visit_id IN (SELECT visit_id FROM vb_result_multiple_exp_groups);
+WHERE id_col IN (SELECT id_col FROM vb_result_multiple_exp_groups);
 
+-- Remove helper column
+ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
+DROP COLUMN id_col;
 
 ------------------------------------------ Checks - Are any visits lost when adding in age? (test numbers for 020-04-06 to 2020-04-27 )------------------------------------------------
 /*-- How many visits are lost?
@@ -153,10 +167,10 @@ WHERE a.destination = 'PS_IPLAYER'
 ;
 
 -- Counts - all modules
-SELECT dt, platform, container, age_range, count(*) AS count_module_views
+/*SELECT dt, platform, container, age_range, count(*) AS count_module_views
 FROM central_insights_sandbox.vb_module_impressions
 GROUP BY dt, platform,container, age_range
-;
+;*/
 
 ----------------------------------------  Linking the click to content to the episode start ----------------------------------------
 
@@ -661,7 +675,7 @@ SELECT platform, exp_group, exp_subgroup, count(distinct bbc_hid3) AS num_users,
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 GROUP BY 1,2,3;
 
-SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
+--SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
 
 SELECT dt,
        click_container,
