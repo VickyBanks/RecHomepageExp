@@ -6,7 +6,7 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('202000427','20200427');
+('20200427','20200427');
 
 SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
@@ -15,7 +15,6 @@ SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 
 -- Identify the users and visits within the exp group.
 -- Users send one flag for the experimental variant and another for which think analytics bucket they're in. Both are needed.
-SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_ids ;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
 SELECT DISTINCT b.*,
@@ -76,7 +75,7 @@ FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
 ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
 -- Some visits end up sending two or three experiment flags. When the signed in user is switched.
--- For 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
+-- For 2020-04-06 to 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
 -- These are removed.
 SELECT dt, num_groups, count(DISTINCT visit_id) AS num_visits
 FROM (SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
@@ -97,7 +96,7 @@ WHERE bbc_hid3 IN (SELECT bbc_hid3 FROM vb_result_multiple_exp_groups)
 AND visit_id IN (SELECT visit_id FROM vb_result_multiple_exp_groups);
 
 
------------------------------------------- Checks - Are any visits lost when adding in age? (test numbers for 2020-04-27)------------------------------------------------
+------------------------------------------ Checks - Are any visits lost when adding in age? (test numbers for 020-04-06 to 2020-04-27 )------------------------------------------------
 /*-- How many visits are lost?
 SELECT count(*) FROM vb_result_multiple_exp_groups WHERE num_groups !=1; -- 45,635 visits are lost by removing those with wo groups
 SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 7,833,679
