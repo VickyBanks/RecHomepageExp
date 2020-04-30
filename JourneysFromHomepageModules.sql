@@ -45,6 +45,7 @@ FROM s3_audience.publisher a
                  a.destination = b.destination
 WHERE a.destination = 'PS_IPLAYER'
   AND (user_experience ILIKE '%REC=think%' OR user_experience ILIKE 'REC=irex%') --find out what think group they're in, or the in house group
+  AND a.container = 'module-recommendations-recommended-for-you'
   AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
   AND (a.metadata ILIKE '%iplayer::bigscreen-html%' OR a.metadata ILIKE '%responsive::iplayer%')
 ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
