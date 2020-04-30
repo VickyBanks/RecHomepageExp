@@ -6,20 +6,16 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200406','20200411');
+('202000427','20200427');
 
+--2020-04-06 to
 
 -----------------------------------------  Identify the user group -----------------------------
 -- Identify the users and visits within the exp group.
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
 SELECT DISTINCT b.*,
-                CASE
-                    WHEN a.user_experience = 'REC=think-personal-iplayer-homepg-tvforyou' THEN 'homepg-tvforyou'
-                    WHEN a.user_experience = 'REC=think-personal-iplayer-homepg-tvforyou-ndm' THEN 'homepg-tvforyou-ndm'
-                    WHEN a.user_experience = 'REC=think-personal-iplayer-player-tvforyou' THEN 'player-tvforyou'
-                    ELSE 'unknown'
-                    END AS exp_subgroup
+                a.user_experience  AS exp_subgroup
 FROM s3_audience.publisher a
          JOIN (SELECT destination,
                       dt,
@@ -49,9 +45,6 @@ FROM s3_audience.publisher a
 WHERE a.destination = 'PS_IPLAYER'
   AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
                                                                                                    FROM central_insights_sandbox.vb_homepage_rec_date_range)
-  AND (a.user_experience ilike '%REC=think-personal-iplayer-homepg-tvforyou%' OR
-       a.user_experience ilike '%REC=think-personal-iplayer-homepg-tvforyou-ndm%' OR
-       a.user_experience ilike '%REC=think-personal-iplayer-player-tvforyou%')
   AND (a.metadata ILIKE '%iplayer::bigscreen-html%' OR a.metadata ILIKE '%responsive::iplayer%')
 ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
 
@@ -620,17 +613,62 @@ SET watched_flag = (CASE
                         WHEN watched_flag IS NULL THEN 'no-watched-flag'
                         ELSE watched_flag END);
 
-
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
+CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_enriched AS
+SELECT a.dt,
+       a.unique_visitor_cookie_id,
+       a.bbc_hid3,
+       a.visit_id,
+       a.click_event_position,
+       a.click_container,
+       a.click_placement,
+       a.content_placement,
+       a.content_id,
+       a.content_start_event_position,
+       a.content_watched_event_position,
+       CASE WHEN a.start_flag = 'iplxp-ep-started' THEN 1
+           ELSE 0 END as start_flag,
+       CASE WHEN a.watched_flag = 'iplxp-ep-watched' THEN 1
+           ELSE 0 END as watched_flag,
+       b.platform,
+       b.exp_group,
+       b.exp_subgroup,
+       b.age_range
+FROM central_insights_sandbox.vb_exp_valid_watched a
+         LEFT JOIN central_insights_sandbox.vb_rec_exp_ids_hid b
+                   ON a.dt = b.dt AND a.bbc_hid3 = b.bbc_hid3 AND a.visit_id = b.visit_id
+;
 
 ---- Look at results
+SELECT platform, exp_group, exp_subgroup, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
+FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+GROUP BY 1,2,3;
 
-SELECT dt, click_container, start_flag,watched_flag, count(visit_id) AS num_clicks
-FROM central_insights_sandbox.vb_exp_valid_watched
-    WHERE click_placement = 'iplayer.tv.page' --homepage
-    GROUP BY 1,2,3,4;
+SELECT dt,
+       click_container,
+       --platform,
+       --exp_group,
+       --exp_subgroup,
+       sum(start_flag)   AS num_starts,
+       sum(watched_flag) as num_watched,
+       count(visit_id)   AS num_clicks
+FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+WHERE click_placement = 'iplayer.tv.page' --homepage
+  AND (click_container = 'module-watching-continue-watching' OR
+       click_container = 'module-recommendations-recommended-for-you'
+    OR click_container = 'module-editorial-featured'
+    OR click_container = 'module-popular-most-popular'
+    OR click_container = 'module-high-priority-bbc-three'
+    OR click_container = 'module-if-you-liked')
+
+GROUP BY 1, 2;
 ---------------------------------------------------------------------------------------------------------------------------------
 
-
+SELECT DISTINCT user_experience
+FROM s3_audience.publisher
+WHERE user_experience like '%REC=%'
+AND dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
+;
 
 
 /*
