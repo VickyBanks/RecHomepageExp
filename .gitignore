@@ -36,6 +36,5 @@ vignettes/*.pdf
 *.knit.md
 
 
-*.xlxs
 *.xlsx
 *.docx
