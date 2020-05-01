@@ -13,8 +13,7 @@ insert into central_insights_sandbox.vb_homepage_rec_date_range values
 
 -----------------------------------------  Identify the user group -----------------------------
 
--- Identify the users and visits within the exp group.
--- Users send one flag for the experimental variant and another for which think analytics bucket they're in. Both are needed.
+-- Identify the users and visits within the exp groups for the experiment flag '%iplxp_irex1_model1_1%'
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_temp;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
     SELECT DISTINCT destination, --gives all the visits in the experiment
@@ -39,6 +38,7 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
                  AND (metadata ILIKE '%iplayer::bigscreen-html%'
                    OR metadata ILIKE '%responsive::iplayer%');
 
+SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids_temp WHERE dt = 20200427;
 --SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp LIMIT 20;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
@@ -104,7 +104,6 @@ SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids;*/
 
 -- Add age and hid into sample IDs as user's are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
-SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid WHERE exp_subgroup ISNULL;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid  AS
 SELECT DISTINCT a.*,
@@ -133,13 +132,16 @@ ADD id_col varchar(400);
 -- Some visits end up sending two or three experiment flags. When the signed in user is switched.
 -- For 2020-04-06 to 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
 -- These need to be removed.
-
+SELECT count(distinct visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_hid WHERE dt = 20200427;
 -- Check how many there are
+CREATE TABLE vb_exp_multiple_variants AS
 SELECT dt, num_groups, count(DISTINCT visit_id) AS num_visits
 FROM (SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
       GROUP BY 1, 2, 3)
-GROUP BY 1,2;
+GROUP BY 1, 2
+ORDER BY 1,2;
+SELECT * FROM vb_exp_multiple_variants;
 
 -- Add helper columns
 UPDATE central_insights_sandbox.vb_rec_exp_ids_hid
@@ -723,8 +725,9 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
 ;
 
 ---- Look at results
-SELECT platform, exp_group, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
+SELECT platform, exp_group, count(distinct unique_visitor_cookie_id) AS num_users, count(distinct visit_id) AS num_visits
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+--FROM central_insights_sandbox.vb_rec_exp_ids_hid
 GROUP BY 1,2;
 
 --SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
@@ -732,7 +735,7 @@ GROUP BY 1,2;
 SELECT dt,
        click_container,
        --platform,
-       --exp_group,
+       exp_group,
        --exp_subgroup,
        sum(start_flag)   AS num_starts,
        sum(watched_flag) as num_watched,
@@ -746,7 +749,7 @@ WHERE click_placement = 'iplayer.tv.page' --homepage
     OR click_container = 'module-high-priority-bbc-three'
     OR click_container = 'module-if-you-liked')
 
-GROUP BY 1, 2;
+GROUP BY 1, 2,3;
 ---------------------------------------------------------------------------------------------------------------------------------
 
 SELECT DISTINCT user_experience
