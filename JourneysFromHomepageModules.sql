@@ -250,6 +250,7 @@ GROUP BY dt, platform,container, age_range
 -- Need all the clicks, not just from homepage, to make sure a click from homepage is not incorrectly linked to (for exmaple) content autoplaying.
 -- Need to eliminate clicks from the TLEO because these are a middle step from homepage.
 
+-- For the recommended module we need to know what recommendation group the content was in - this comes in the user_experience field.
 -- All standard clicks
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
 CREATE TABLE central_insights_sandbox.vb_exp_content_clicks AS
@@ -263,7 +264,8 @@ SELECT DISTINCT a.dt,
                     ELSE a.container END AS container,
                 a.attribute,
                 a.placement,
-                a.result
+                a.result,
+                a.user_experience
 FROM s3_audience.publisher a
          JOIN central_insights_sandbox.vb_rec_exp_ids_hid b -- this is to bring in only those visits in our exp group
               ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
@@ -276,7 +278,7 @@ WHERE (a.attribute LIKE 'content-item%' OR a.attribute LIKE 'start-watching%' OR
 AND a.placement NOT ILIKE '%tleo%' -- we need homepage-episode, ignoring any TLEO middle step
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
 
-
+SELECT * FROM central_insights_sandbox.vb_exp_content_clicks ORDER BY dt, visit_id, event_position LIMIT 500;
 
 -- Clicks can come from the autoplay system starting an episode
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_clicks;
@@ -386,7 +388,8 @@ SELECT dt,
        container,
        attribute,
        placement,
-       result AS click_destination_id
+       result AS click_destination_id,
+       user_experience AS think_group -- this will only apply to content from the homepage rec-module. Most will be NULL.
 FROM central_insights_sandbox.vb_exp_content_clicks;
 
 -- Autoplay
@@ -402,6 +405,7 @@ SELECT dt,
        next_ep_id AS click_destination_id
 FROM central_insights_sandbox.vb_exp_autoplay_clicks;
 
+SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks WHERE attribute ILIKE '%squeeze-auto-play%' LIMIT 10;
 -- Web autoplay
 INSERT INTO central_insights_sandbox.vb_exp_all_content_clicks
 SELECT dt,
@@ -446,6 +450,7 @@ SELECT DISTINCT a.dt,
                 a.attribute,
                 a.placement,
                 a.result AS content_id,
+                CAST(NULL AS varchar(400)) AS think_group,
                 ISNULL(c.series_id,'unknown') AS series_id,
                 ISNULL(c.brand_id, 'unknown') AS brand_id
 FROM s3_audience.publisher a
@@ -478,7 +483,8 @@ SELECT dt,
        container,
        attribute,
        placement,
-       click_destination_id AS content_id
+       click_destination_id AS content_id,
+       think_group
 FROM central_insights_sandbox.vb_exp_all_content_clicks;
 
 -- Add in row number for each visit
@@ -489,7 +495,7 @@ SELECT *, row_number() over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, 
 FROM central_insights_sandbox.vb_exp_clicks_and_starts_temp
 ORDER BY dt, unique_visitor_cookie_id, bbc_hid3, visit_id, event_position;
 
-
+SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts  WHERE think_group IS NOT NULL LIMIT 5;
 -- Join the table back on itself to match the content click to the ixpl start by the content_id.
 -- For categories and channels the click ID is often unknown so need to create one master table so the click event before ixpl start can be taken in these cases
 -- If that's ever fixed then can simply join play starts with clicks
@@ -507,19 +513,20 @@ SELECT a.dt,
        a.unique_visitor_cookie_id,
        a.bbc_hid3,
        a.visit_id,
-       a.event_position                                                                                            AS click_event_position,
-       a.container                                                                                                 AS click_container,
-       a.attribute                                                                                                 AS click_attibute,
-       a.placement                                                                                                 AS click_placement,
-       a.content_id                                                                                                AS click_id,
-       b.container                                                                                                 AS content_container,
-       ISNULL(b.attribute, 'no-start-flag')                                                                        AS content_attribute,
-       b.placement                                                                                                 AS content_placement,
-       b.content_id                                                                                                AS content_id,
-       b.event_position                                                                                            AS content_start_event_position,
+       a.think_group                        AS click_think_group,
+       a.event_position                     AS click_event_position,
+       a.container                          AS click_container,
+       a.attribute                          AS click_attibute,
+       a.placement                          AS click_placement,
+       a.content_id                         AS click_id,
+       b.container                          AS content_container,
+       ISNULL(b.attribute, 'no-start-flag') AS content_attribute,
+       b.placement                          AS content_placement,
+       b.content_id                         AS content_id,
+       b.event_position                     AS content_start_event_position,
        CASE
            WHEN b.event_position IS NOT NULL THEN CAST(b.event_position - a.event_position AS integer)
-           ELSE 0 END                                                                                              AS content_start_diff
+           ELSE 0 END                       AS content_start_diff
 FROM vb_temp_clicks a
          LEFT JOIN vb_temp_starts b
                    ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
@@ -571,11 +578,12 @@ SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
        visit_id,
-       event_position                       AS click_event_position,
-       container                            AS click_container,
-       attribute                            AS click_attribute,
-       placement                            AS click_placement,
-       content_id                           AS click_episode_id
+       think_group    AS click_think_group,
+       event_position AS click_event_position,
+       container      AS click_container,
+       attribute      AS click_attribute,
+       placement      AS click_placement,
+       content_id     AS click_episode_id
 FROM (SELECT a.*, b.visit_id as missing_flag
       FROM vb_temp_clicks a
                LEFT JOIN central_insights_sandbox.vb_exp_clicks_linked_starts_valid b
@@ -589,13 +597,14 @@ UPDATE central_insights_sandbox.vb_exp_clicks_linked_starts_valid
 SET content_attribute = (CASE
                              WHEN content_attribute IS NULL THEN 'no-start-flag'
                              ELSE content_attribute END);
-
+SELECT * FROM  central_insights_sandbox.vb_exp_clicks_linked_starts_valid LIMIT 100;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_starts;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_starts AS
 SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
        visit_id,
+       click_think_group,
        click_attibute,
        click_container,
        click_placement,
@@ -671,6 +680,7 @@ SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
        visit_id,
+       click_think_group,
        click_event_position,
        click_container,
        click_placement,
@@ -689,6 +699,7 @@ SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
        visit_id,
+       click_think_group,
        click_event_position,
        click_container,
        click_placement,
@@ -722,6 +733,7 @@ SELECT a.dt,
        a.unique_visitor_cookie_id,
        a.bbc_hid3,
        a.visit_id,
+       a.click_think_group,
        a.click_event_position,
        a.click_container,
        a.click_placement,
@@ -754,6 +766,7 @@ GROUP BY 1,2;
 -- doens't include people who didn't click
 SELECT dt,
        click_container,
+       click_think_group,
        --platform,
        exp_group,
        --exp_subgroup,
@@ -768,7 +781,7 @@ WHERE click_placement = 'iplayer.tv.page' --homepage
     OR click_container = 'module-popular-most-popular'
     OR click_container = 'module-high-priority-bbc-three'
     OR click_container = 'module-if-you-liked')
-GROUP BY 1, 2,3;
+GROUP BY 1, 2,3,4;
 
 SELECT *
 FROM (SELECT
