@@ -12,15 +12,15 @@ FROM central_insights_sandbox.vb_rec_exp_ids_hid
 GROUP BY 1;
 
 
--- What % of user's have a think group identifiable.
--- 1. For each hid select the distinct user experiences that are think or blank.
+-- What % of user's have a think group identifiable?
+-- For each hid select the distinct user experiences that are think or blank.
 DROP TABLE vb_distinct_user_experience;
 CREATE TEMP TABLE vb_distinct_user_experience AS
 SELECT DISTINCT bbc_hid3, exp_group, CAST(NULL as varchar(400)) AS user_experience
 FROM central_insights_sandbox.vb_rec_exp_ids_hid
-WHERE exp_group != 'variation_2';
+WHERE exp_group != 'variation_2'; -- place everyone in the table with a blank value
 
-INSERT INTO vb_distinct_user_experience
+INSERT INTO vb_distinct_user_experience -- add in any think homepage groups found
 SELECT DISTINCT b.bbc_hid3,
                 b.exp_group,
                 a.user_experience
@@ -39,10 +39,14 @@ ORDER BY b.bbc_hid3
 SELECT user_experience, COUNT(DISTINCT bbc_hid3) as num_hids FROM vb_distinct_user_experience
 GROUP BY 1;
 
-SELECT COUNT(DISTINCT bbc_hid3) FROM central_insights_sandbox.vb_rec_exp_ids_hid WHERE exp_group != 'variation_2'; --2,867,789
-SELECT COUNT(DISTINCT bbc_hid3) FROM vb_distinct_user_experience; --2,867,789 2,865,886
+-- How many were in more than one think group? - 70,365
+-- So they could have seen item 1 & 2 which come from different think recs (web) or clicked one of each (web & tv)
+SELECT count(*) FROM (
+SELECT *, row_number() over (partition by bbc_hid3) as group_count
+FROM vb_distinct_user_experience
+WHERE user_experience IS NOT NULL)
+WHERE group_count >=2;
 
--- 2. Select only the ones with noth
 
 
 
