@@ -23,6 +23,7 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
                       CASE
                           WHEN metadata iLIKE '%iplayer::bigscreen-html%' THEN 'bigscreen'
                           WHEN metadata ILIKE '%responsive::iplayer%' THEN 'web'
+                          --WHEN metadata ILIKE '%mobile%' THEN 'mobile'
                           END AS platform,
                       CASE
                           WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_1' THEN 'variation_1'
@@ -126,36 +127,37 @@ FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
 ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
 
-ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
-ADD id_col varchar(400);
-
 -- Some visits end up sending two or three experiment flags. When the signed in user is switched.
 -- For 2020-04-06 to 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
 -- These need to be removed.
 SELECT count(distinct visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_hid WHERE dt = 20200427;
 -- Check how many there are
+DROP TABLE IF EXISTS vb_exp_multiple_variants;
 CREATE TABLE vb_exp_multiple_variants AS
 SELECT dt, num_groups, count(DISTINCT visit_id) AS num_visits
 FROM (SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
-      GROUP BY 1, 2, 3)
+      GROUP BY 1, 2, 3
+    ORDER BY num_groups DESC)
 GROUP BY 1, 2
 ORDER BY 1,2;
-SELECT * FROM vb_exp_multiple_variants;
+--SELECT * FROM vb_exp_multiple_variants;
+----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- Add helper columns
+ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
+ADD id_col varchar(400);
 UPDATE central_insights_sandbox.vb_rec_exp_ids_hid
 SET id_col = dt||bbc_hid3 || visit_id;
 
 -- Identify visits
---DROP TABLE vb_result_multiple_exp_groups;
+DROP TABLE vb_result_multiple_exp_groups;
 CREATE TEMP TABLE vb_result_multiple_exp_groups AS
     SELECT CAST(dt || bbc_hid3|| visit_id AS varchar(400)) AS id_col, --create composite id col
            count(DISTINCT exp_group) AS num_groups
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
       GROUP BY 1
         HAVING num_groups >1;
-
 -- Remove visits
 DELETE FROM central_insights_sandbox.vb_rec_exp_ids_hid
 WHERE id_col IN (SELECT id_col FROM vb_result_multiple_exp_groups);
@@ -163,6 +165,14 @@ WHERE id_col IN (SELECT id_col FROM vb_result_multiple_exp_groups);
 -- Remove helper column
 ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
 DROP COLUMN id_col;
+
+SELECT platform,
+       exp_group,
+       count(distinct bbc_hid3)                   as num_hids,
+       count(distinct unique_visitor_cookie_id)   as num_uv,
+       count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+FROM central_insights_sandbox.vb_rec_exp_ids_hid
+GROUP BY 1,2;
 
 ------------------------------------------ Checks - Are any visits lost when adding in age? (test numbers for 020-04-06 to 2020-04-27 )------------------------------------------------
 /*-- How many visits are lost?
@@ -217,8 +227,16 @@ WHERE a.destination = 'PS_IPLAYER'
       AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
   AND a.publisher_impressions = 1
   AND placement = 'iplayer.tv.page'--homepage only
+  AND a.metadata ILIKE '%responsive::iplayer%'
   AND b.platform = 'web'
 ;
+
+-- How many visits were there and how many actually saw the rec-module
+/*SELECT count(visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_hid
+    WHERE dt = 20200427 and platform = 'web'; -- 202,103
+SELECT count(DISTINCT visit_id) FROM central_insights_sandbox.vb_module_impressions
+    WHERE dt = 20200427 AND container = 'module-recommendations-recommended-for-you'; -- 26,416
+*/
 
 -- Counts - all modules
 /*SELECT dt, platform, container, age_range, count(*) AS count_module_views
@@ -732,6 +750,8 @@ GROUP BY 1,2;
 
 --SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
 
+-- this gives the starts and watches and number of clicks to a module.
+-- doens't include people who didn't click
 SELECT dt,
        click_container,
        --platform,
@@ -739,7 +759,7 @@ SELECT dt,
        --exp_subgroup,
        sum(start_flag)   AS num_starts,
        sum(watched_flag) as num_watched,
-       count(visit_id)   AS num_clicks
+       count(visit_id)   AS num_clicks_to_module
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_placement = 'iplayer.tv.page' --homepage
   AND (click_container = 'module-watching-continue-watching' OR
@@ -748,16 +768,40 @@ WHERE click_placement = 'iplayer.tv.page' --homepage
     OR click_container = 'module-popular-most-popular'
     OR click_container = 'module-high-priority-bbc-three'
     OR click_container = 'module-if-you-liked')
-
 GROUP BY 1, 2,3;
----------------------------------------------------------------------------------------------------------------------------------
 
-SELECT DISTINCT user_experience
-FROM s3_audience.publisher
-WHERE user_experience like '%REC=%'
-AND dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
-;
+SELECT *
+FROM (SELECT
+             exp_group,
+             count(distinct bbc_hid3)                   as num_hids,
+             count(distinct unique_visitor_cookie_id)   as num_uv,
+             count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+      FROM central_insights_sandbox.vb_rec_exp_ids_hid
+      GROUP BY 1) a
+         JOIN (SELECT
+                      exp_group,
+                      sum(start_flag)   AS num_starts,
+                      sum(watched_flag) as num_watched,
+                      count(visit_id)   AS num_clicks_to_module
+               FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+               WHERE click_placement = 'iplayer.tv.page' --homepage
+                 AND click_container = 'module-recommendations-recommended-for-you'
+               GROUP BY 1) b ON a.exp_group = b.exp_group
+ORDER BY a.exp_group;
+--------------------------------------------------------------------------------------------------------------------------------
+SELECT row_num FROM
+(SELECT *,row_number() over (partition by unique_visitor_cookie_id, bbc_hid3) as row_num FROM
+central_insights_sandbox.vb_rec_exp_ids_hid)
+WHERE row_num >1
+ORDER BY bbc_hid3,row_num;
 
+SELECT
+       exp_group,
+       count(bbc_hid3)                   as num_hids,
+       --count(distinct unique_visitor_cookie_id)   as num_uv,
+       count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+FROM central_insights_sandbox.vb_rec_exp_ids_hid
+GROUP By 1, 2;
 
 /*
 -- Select all publisher data for these users
