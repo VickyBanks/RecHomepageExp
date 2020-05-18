@@ -6,7 +6,7 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200413','20200427');
+('20200413','20200513');
 
 --SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
@@ -151,7 +151,7 @@ UPDATE central_insights_sandbox.vb_rec_exp_ids_hid
 SET id_col = dt||bbc_hid3 || visit_id;
 
 -- Identify visits
-DROP TABLE vb_result_multiple_exp_groups;
+DROP TABLE IF EXISTS vb_result_multiple_exp_groups;
 CREATE TEMP TABLE vb_result_multiple_exp_groups AS
     SELECT CAST(dt || bbc_hid3|| visit_id AS varchar(400)) AS id_col, --create composite id col
            count(DISTINCT exp_group) AS num_groups
@@ -166,13 +166,13 @@ WHERE id_col IN (SELECT id_col FROM vb_result_multiple_exp_groups);
 ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
 DROP COLUMN id_col;
 
-SELECT platform,
+/*SELECT platform,
        exp_group,
        count(distinct bbc_hid3)                   as num_hids,
        count(distinct unique_visitor_cookie_id)   as num_uv,
        count(distinct dt || bbc_hid3 || visit_id) AS num_visits
 FROM central_insights_sandbox.vb_rec_exp_ids_hid
-GROUP BY 1,2;
+GROUP BY 1,2;*/
 
 ------------------------------------------ Checks - Are any visits lost when adding in age? (test numbers for 020-04-06 to 2020-04-27 )------------------------------------------------
 /*-- How many visits are lost?
@@ -278,7 +278,7 @@ WHERE (a.attribute LIKE 'content-item%' OR a.attribute LIKE 'start-watching%' OR
 AND a.placement NOT ILIKE '%tleo%' -- we need homepage-episode, ignoring any TLEO middle step
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
 
-SELECT * FROM central_insights_sandbox.vb_exp_content_clicks ORDER BY dt, visit_id, event_position LIMIT 500;
+--SELECT * FROM central_insights_sandbox.vb_exp_content_clicks ORDER BY dt, visit_id, event_position LIMIT 500;
 
 -- Clicks can come from the autoplay system starting an episode
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_clicks;
@@ -495,7 +495,7 @@ SELECT *, row_number() over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, 
 FROM central_insights_sandbox.vb_exp_clicks_and_starts_temp
 ORDER BY dt, unique_visitor_cookie_id, bbc_hid3, visit_id, event_position;
 
-SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts  WHERE think_group IS NOT NULL LIMIT 5;
+--SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts  WHERE think_group IS NOT NULL LIMIT 5;
 -- Join the table back on itself to match the content click to the ixpl start by the content_id.
 -- For categories and channels the click ID is often unknown so need to create one master table so the click event before ixpl start can be taken in these cases
 -- If that's ever fixed then can simply join play starts with clicks
@@ -618,10 +618,10 @@ FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
 
 --SELECT * FROM central_insights_sandbox.vb_exp_valid_starts limit 5;
 
-SELECT click_container, content_attribute, count(visit_id) AS num_clicks
+/*SELECT click_container, content_attribute, count(visit_id) AS num_clicks
 FROM central_insights_sandbox.vb_exp_valid_starts
     WHERE click_placement = 'iplayer.tv.page' --homepage
-    GROUP BY 1,2;
+    GROUP BY 1,2;*/
 
 
 
@@ -801,236 +801,50 @@ FROM (SELECT
                  AND click_container = 'module-recommendations-recommended-for-you'
                GROUP BY 1) b ON a.exp_group = b.exp_group
 ORDER BY a.exp_group;
---------------------------------------------------------------------------------------------------------------------------------
-SELECT row_num FROM
-(SELECT *,row_number() over (partition by unique_visitor_cookie_id, bbc_hid3) as row_num FROM
-central_insights_sandbox.vb_rec_exp_ids_hid)
-WHERE row_num >1
-ORDER BY bbc_hid3,row_num;
+------------------------------------------------  END  --------------------------------------------------------------------------------
 
-SELECT
-       exp_group,
-       count(bbc_hid3)                   as num_hids,
-       --count(distinct unique_visitor_cookie_id)   as num_uv,
-       count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+-- Data for analysis
+-- Check dates
+SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
+-- How many hids?
+SELECT platform, exp_group, count(DISTINCT bbc_hid3)
 FROM central_insights_sandbox.vb_rec_exp_ids_hid
-GROUP By 1, 2;
+GROUP BY 1,2;
 
-/*
--- Select all publisher data for these users
-DROP TABLE IF EXISTS vb_rec_exp_data;
-CREATE TABLE vb_rec_exp_data AS
-SELECT a.bbc_hid3,
-       a.dt,
-       a.visit_id,
-       a.platform,
-       b.event_position,
-       b.container,
-       b.attribute,
-       b.placement,
-       b.result,
-       b.publisher_clicks,
-       b.publisher_impressions,
-       b.event_start_datetime
-FROM vb_expids a
-         JOIN s3_audience.publisher b ON a.dt = b.dt
-    AND a.visit_id = b.visit_id AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id
-WHERE b.destination = 'PS_IPLAYER'
-  AND (b.metadata LIKE '%iplayer::bigscreen-html%' OR b.metadata LIKE '%responsive::iplayer%')
-  AND b.dt BETWEEN '20200319' AND '20200326';
+-- Temp table giving number of starts and watched for each hid
+CREATE TEMP TABLE vb_rec_exp_module_clicks AS
+SELECT platform,
+       exp_group,
+       bbc_hid3,
+       sum(start_flag)   as num_starts,
+       sum(watched_flag) as num_watched
+FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+WHERE click_container = 'module-recommendations-recommended-for-you'
+GROUP BY 1, 2, 3;
 
--- Select all the entries where content was played to give the flag 'iplxp-ep-started'
-DROP TABLE IF EXISTS vb_rec_exp_play_starts;
-CREATE TABLE vb_rec_exp_play_starts AS
-SELECT DISTINCT a.dt,
+CREATE TEMP TABLE vb_rec_exp_results AS
+SELECT DISTINCT a.platform,
+                a.exp_group,
                 a.bbc_hid3,
-                a.visit_id,
-                a.event_position,
-                a.container,
-                a.attribute,
-                a.placement,
-                a.result,
-                a.platform,
-                b.brand_id,
-                b.series_id
-FROM vb_rec_exp_data a
-         JOIN prez.scv_vmb b ON a.result = b.episode_id
-WHERE a.publisher_impressions = 1
-  and a.attribute = 'iplxp-ep-started'
-ORDER BY a.dt, a.bbc_hid3, a.visit_id, a.event_position;
-
-SELECT * FROM vb_rec_exp_data LIMIT 10
+                ISNULL(b.num_starts, 0)  as num_starts,
+                ISNULL(b.num_watched, 0) AS num_watched
+FROM central_insights_sandbox.vb_rec_exp_ids_hid a
+         LEFT JOIN vb_rec_exp_module_clicks b
+                   on a.bbc_hid3 = b.bbc_hid3 AND a.platform = b.platform AND a.exp_group = b.exp_group
 ;
+SELECT platform, exp_group, count(DISTINCT bbc_hid3)
+FROM vb_rec_exp_results
+GROUP BY 1,2;
 
--- Join the starts to any content item click that came before them.
--- Check the same dt, UV and visit id.
--- Ensure that the content result is the brand, series or episode id that was started.
-DROP TABLE IF EXISTS vb_rec_exp_valid_starts_temp;
-CREATE TABLE vb_rec_exp_valid_starts_temp AS
-SELECT a.dt,
-       a.bbc_hid3,
-       a.visit_id,
-       a.event_position                                     AS content_event_position,
-       CASE
-           WHEN b.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked'
-           ELSE b.container END                             AS container,
-       a.attribute                                          AS content_attribute,
-       a.result                                             AS content_result,
-       a.event_position                                     AS start_event_position,
-       a.attribute                                          AS start_attribute,
-       a.result                                             AS start_result,
-       a.brand_id,
-       a.series_id,
-       a.platform,
-       CAST(a.event_position - b.event_position AS integer) AS content_start_diff
-FROM vb_rec_exp_play_starts a
-         INNER JOIN vb_rec_exp_data b
-                    ON a.dt = b.dt AND a.visit_id = b.visit_id AND a.bbc_hid3 = b.bbc_hid3
-WHERE b.attribute LIKE 'content_item'
-  AND b.publisher_clicks = 1
-  AND b.event_position < a.event_position
-  AND b.placement = 'iplayer.tv.page'
-  AND (b.result = a.result OR b.result = a.brand_id OR b.result = a.series_id);
+-- save file, no headers
+SELECT bbc_hid3 AS , num_starts--, num_watched
+FROM vb_rec_exp_results
+WHERE platform = 'bigscreen'
+AND exp_group = 'variation_2';
+--------1278644
 
 
-DROP TABLE IF EXISTS vb_rec_exp_valid_starts;
-CREATE TABLE vb_rec_exp_valid_starts AS
-SELECT *
-FROM (SELECT *,
-             row_number()
-             OVER (PARTITION BY dt, bbc_hid3, visit_id, start_event_position ORDER BY content_start_diff) AS duplicate_identifier
-      FROM vb_rec_exp_valid_starts_temp
-      ORDER BY bbc_hid3, visit_id, start_event_position)
-WHERE duplicate_identifier = 1;
-
-
-
--- How many starts
-SELECT a.platform, a.container, b.age_range, count(a.start_result)
-FROM vb_rec_exp_valid_starts a
-JOIN vb_expIDs b ON a.dt = b.dt AND a.visit_id = b.visit_id AND a.bbc_hid3 = b.bbc_hid3
-GROUP BY a.platform,a.container, b.age_range;
-
--- Starts per age
-SELECT container, count(start_result)
-FROM vb_rec_exp_valid_starts
-GROUP BY container;
-
-
---- How many made it all the way through content to the watched flag
-DROP TABLE IF EXISTS vb_rec_exp_play_watched;
-CREATE TABLE vb_rec_exp_play_watched AS
-SELECT DISTINCT a.dt,
-                a.bbc_hid3,
-                a.visit_id,
-                a.event_position,
-                a.container,
-                a.attribute,
-                a.placement,
-                a.result,
-                b.brand_id,
-                b.series_id
-FROM vb_rec_exp_data a
-         JOIN prez.scv_vmb b ON a.result = b.episode_id
-WHERE a.publisher_impressions = 1
-  and a.attribute = 'iplxp-ep-watched'
-ORDER BY a.dt, a.bbc_hid3, a.visit_id, a.event_position;
-
--- Join the watch events to the validated start events, ensuring the same episode ID
-DROP TABLE IF EXISTS vb_rec_exp_valid_watched_temp;
-CREATE TABLE vb_rec_exp_valid_watched_temp AS
-         SELECT a.dt,
-                a.bbc_hid3,
-                a.visit_id,
-                a.content_event_position,
-                a.container,
-                a.content_attribute,
-                a.content_result,
-                a.start_event_position,
-                a.start_result,
-                a.platform,
-                b.attribute      AS watched_attribute,
-                b.result         AS watched_result,
-                b.event_position AS watched_event_position,
-                CAST(b.event_position-a.start_event_position AS integer) AS start_watched_diff
-         FROM vb_rec_exp_valid_starts a
-                  JOIN vb_rec_exp_play_watched b on a.dt = b.dt AND a.visit_id = b.visit_id AND a.bbc_hid3 = b.bbc_hid3
-         WHERE  a.start_event_position < b.event_position
-           AND a.start_result = b.result;
-
-
--- Validate to ensure no duplicates. Select the start nearest to the watched event.
-DROP TABLE IF EXISTS vb_rec_exp_valid_watched;
-CREATE TABLE vb_rec_exp_valid_watched AS
-SELECT *
-FROM (SELECT *,
-             row_number()
-             OVER (PARTITION BY dt, bbc_hid3, visit_id, watched_event_position ORDER BY start_watched_diff) AS duplicate_identifier
-      FROM vb_rec_exp_valid_watched_temp
-      ORDER BY bbc_hid3, visit_id, start_event_position)
-WHERE duplicate_identifier = 1;
-
-SELECT a.platform, a.container, b.age_range, count(a.watched_result)
-FROM vb_rec_exp_valid_watched a
-JOIN vb_expIDs b ON a.dt = b.dt AND a.visit_id = b.visit_id AND a.bbc_hid3 = b.bbc_hid3
-GROUP BY a.platform, a.container, b.age_range LIMIT 5;
-
-
-SELECT dt, container, count(start_result) AS num_starts FROM vb_rec_exp_valid_starts GROUP BY dt, container;
-SELECT container, count(watched_result) AS num_watched FROM vb_rec_exp_valid_watched  GROUP BY container;
-
-SELECT * FROM vb_rec_exp_valid_starts  LIMIT 5;
-
--- Complete table - web
-DROP TABLE IF EXISTS vb_all_module_summary;
-CREATE TABLE vb_all_module_summary AS
-SELECT a.dt, a.bbc_hid3, a.visit_id, a.container, b.age_range, c.start_result, d.watched_result
-FROM vb_module_impressions a
-         JOIN vb_expIDs b ON a.dt = b.dt AND a.visit_id = b.visit_id AND a.bbc_hid3 = b.bbc_hid3
-         LEFT JOIN (SELECT dt, bbc_hid3, visit_id, container, start_result
-                    FROM vb_rec_exp_valid_starts
-                    WHERE platform = 'web') c
-                   ON a.dt = c.dt AND a.visit_id = c.visit_id AND a.bbc_hid3 = c.bbc_hid3 AND a.container = c.container
-LEFT JOIN (SELECT dt, bbc_hid3, visit_id, container, watched_result
-                    FROM vb_rec_exp_valid_watched
-                    WHERE platform = 'web') d
-                   ON a.dt = d.dt AND a.visit_id = d.visit_id AND a.bbc_hid3 = d.bbc_hid3 AND a.container = d.container AND c.start_result = d.watched_result
-WHERE a.platform = 'web';
-
--- Complete table - bigscreen
-DROP TABLE IF EXISTS vb_all_module_summary_bigscreen;
-CREATE TABLE vb_all_module_summary_bigscreen AS
-SELECT a.dt, a.bbc_hid3, a.visit_id, a.container, b.age_range, a.start_result, d.watched_result
-FROM vb_rec_exp_valid_starts a
-JOIN vb_expIDs b ON a.dt = b.dt AND a.visit_id = b.visit_id AND a.bbc_hid3 = b.bbc_hid3
-LEFT JOIN (SELECT dt, bbc_hid3, visit_id, container, watched_result
-                    FROM vb_rec_exp_valid_watched
-                    WHERE platform = 'bigscreen') d
-                   ON a.dt = d.dt AND a.visit_id = d.visit_id AND a.bbc_hid3 = d.bbc_hid3 AND a.container = d.container AND a.start_result = d.watched_result
-WHERE a.platform = 'bigscreen';
-
-
-SELECT * FROM vb_all_module_summary
-WHERE age_range = '16-24' ANd start_result IS NOT NULL AND watched_result IS NOT NULL
-ORDER BY dt, age_range, container LIMIT 100 ;
-
-
--- Web summary
-SELECT dt,
-       age_range,
-       container,
-       count(bbc_hid3)       AS num_impressions,
-       count(start_result)   AS num_start_results,
-       count(watched_result) AS num_watched_result
-FROM vb_all_module_summary
-GROUP BY dt, age_range, container;
-
--- bigscreen summary
-SELECT dt,
-       age_range,
-       container,
-       count(start_result)   AS num_start_results,
-       count(watched_result) AS num_watched_result
-FROM vb_all_module_summary_bigscreen
-GROUP BY dt, age_range, container;
-
+SELECT exp_group, click_think_group, sum(start_flag) as num_starts, sum(watched_flag)
+FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+WHERE click_think_group IS NOT NULL
+GROUP By 1,2;
