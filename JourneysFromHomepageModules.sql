@@ -807,24 +807,68 @@ ORDER BY a.exp_group;
 -- Check dates
 SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 -- How many hids?
-SELECT platform, exp_group, count(DISTINCT bbc_hid3)
+SELECT platform,
+       exp_group,
+       age_range,
+       count(DISTINCT bbc_hid3) AS num_signed_in_users
 FROM central_insights_sandbox.vb_rec_exp_ids_hid
-GROUP BY 1,2;
+GROUP BY 1, 2,3
+ORDER BY 1,2,3;
+
+-- How many visits?
+SELECT platform,
+       exp_group,
+       age_range,
+       count(visit_id) AS num_visits
+FROM central_insights_sandbox.vb_rec_exp_ids_hid
+GROUP BY 1, 2,3
+ORDER BY 1,2,3;
+
+--num starts total
+SELECT --platform,
+       exp_group,
+       sum(start_flag)   as num_starts,
+       sum(watched_flag) as num_watched
+FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+WHERE click_container = 'module-recommendations-recommended-for-you'
+GROUP BY 1;--, 2;
+
+-- number of module impressions
+SELECT a.platform,
+       b.exp_group,
+       count(a.visit_id) AS num_visits_saw_module
+FROM central_insights_sandbox.vb_module_impressions a
+JOIN central_insights_sandbox.vb_rec_exp_ids_hid b  on a.dt = b.dt AND a.bbc_hid3 = b.bbc_hid3 and a.visit_id = b.visit_id
+WHERE a.container = 'module-recommendations-recommended-for-you'
+GROUP BY 1, 2;
+
+-- Number of module clicks
+SELECT --platform,
+       exp_group,
+       count(visit_id) AS num_clicks
+FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+WHERE click_container = 'module-recommendations-recommended-for-you'
+GROUP BY 1;--,2;
+
+
+
 
 -- Temp table giving number of starts and watched for each hid
 CREATE TEMP TABLE vb_rec_exp_module_clicks AS
 SELECT platform,
        exp_group,
+       age_range,
        bbc_hid3,
        sum(start_flag)   as num_starts,
        sum(watched_flag) as num_watched
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_container = 'module-recommendations-recommended-for-you'
-GROUP BY 1, 2, 3;
+GROUP BY 1, 2, 3,4;
 
 CREATE TEMP TABLE vb_rec_exp_results AS
 SELECT DISTINCT a.platform,
                 a.exp_group,
+                a.age_range,
                 a.bbc_hid3,
                 ISNULL(b.num_starts, 0)  as num_starts,
                 ISNULL(b.num_watched, 0) AS num_watched
@@ -832,15 +876,18 @@ FROM central_insights_sandbox.vb_rec_exp_ids_hid a
          LEFT JOIN vb_rec_exp_module_clicks b
                    on a.bbc_hid3 = b.bbc_hid3 AND a.platform = b.platform AND a.exp_group = b.exp_group
 ;
+SELECT * FROM vb_rec_exp_results; --pull out all results and manipulate in R.
+
+
+
 SELECT platform, exp_group, count(DISTINCT bbc_hid3)
 FROM vb_rec_exp_results
 GROUP BY 1,2;
 
 -- save file, no headers
-SELECT bbc_hid3 AS , num_starts--, num_watched
+SELECT bbc_hid3, sum(num_starts) num_watched
 FROM vb_rec_exp_results
-WHERE platform = 'bigscreen'
-AND exp_group = 'variation_2';
+WHERE exp_group = 'variation_2'
 --------1278644
 
 
@@ -848,3 +895,5 @@ SELECT exp_group, click_think_group, sum(start_flag) as num_starts, sum(watched_
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_think_group IS NOT NULL
 GROUP By 1,2;
+
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
