@@ -825,30 +825,37 @@ GROUP BY 1, 2,3
 ORDER BY 1,2,3;
 
 --num starts total
-SELECT --platform,
+SELECT platform,
        exp_group,
+       age_range,
        sum(start_flag)   as num_starts,
        sum(watched_flag) as num_watched
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_container = 'module-recommendations-recommended-for-you'
-GROUP BY 1;--, 2;
+GROUP BY 1, 2,3
+ORDER BY 1,2,3;
 
 -- number of module impressions
 SELECT a.platform,
        b.exp_group,
+       a.age_range,
        count(a.visit_id) AS num_visits_saw_module
 FROM central_insights_sandbox.vb_module_impressions a
 JOIN central_insights_sandbox.vb_rec_exp_ids_hid b  on a.dt = b.dt AND a.bbc_hid3 = b.bbc_hid3 and a.visit_id = b.visit_id
 WHERE a.container = 'module-recommendations-recommended-for-you'
-GROUP BY 1, 2;
+GROUP BY 1, 2,3
+ORDER BY 1,2,3;
 
 -- Number of module clicks
-SELECT --platform,
+SELECT platform,
        exp_group,
+       age_range,
        count(visit_id) AS num_clicks
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_container = 'module-recommendations-recommended-for-you'
-GROUP BY 1;--,2;
+GROUP BY 1, 2,3
+ORDER BY 1,2,3;
+
 
 
 
