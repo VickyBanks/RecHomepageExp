@@ -81,7 +81,6 @@ ggbetween_plot_starts
 
 
 ###### Metric 2 - num watched ######
-###### Metric 1 - num starts ######
 ggbetween_plot_watched <- Experiment %>%
    ggstatsplot::ggbetweenstats(
       x = Variant,
@@ -112,7 +111,9 @@ uplift_calculator <- function(Control_Metric, Variant_Metric){
    }else{sprintf("The variant performed worse than the control by %s", uplift, Control_Metric, Variant_Metric)}
 }
 
-### Uplift calculations
+### Uplift calculations 
+
+#### play starts
 ### Here are the means of all your varaiants ###
 Control_starts <- mean(Control$num_starts)
 Variant1_starts <- mean(Variant1$num_starts)
@@ -122,6 +123,15 @@ uplift_calculator(Control_starts, Variant1_starts)
 uplift_calculator(Control_starts, Variant2_starts)
 uplift_calculator(Variant1_starts, Variant2_starts)
 
+#### play watched
+### Here are the means of all your varaiants ###
+Control_watched <- mean(Control$num_watched)
+Variant1_watched <- mean(Variant1$num_watched)
+Variant2_watched <- mean(Variant2$num_watched)
+### Fill in this function with your mean values ###
+uplift_calculator(Control_watched, Variant1_watched)
+uplift_calculator(Control_watched, Variant2_watched)
+uplift_calculator(Variant1_watched, Variant2_watched)
 
 
 

@@ -891,16 +891,10 @@ SELECT platform, exp_group, count(DISTINCT bbc_hid3)
 FROM vb_rec_exp_results
 GROUP BY 1,2;
 
--- save file, no headers
-SELECT bbc_hid3, sum(num_starts) num_watched
-FROM vb_rec_exp_results
-WHERE exp_group = 'variation_2'
---------1278644
 
-
-SELECT exp_group, click_think_group, sum(start_flag) as num_starts, sum(watched_flag)
+SELECT platform, exp_group, click_think_group, sum(start_flag) as num_starts, sum(watched_flag) as num_watched
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_think_group IS NOT NULL
-GROUP By 1,2;
+GROUP By 1,2,3;
 
 SELECT DISTINCT dt FROM central_insights_sandbox.vb_exp_valid_watched_enriched;

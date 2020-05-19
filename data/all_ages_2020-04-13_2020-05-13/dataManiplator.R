@@ -3,7 +3,7 @@ library(readr)
 
 
 results<- read_csv("vb_rec_exp_results.csv")
-head(results)
+head(results, n = 20)
 
 #Summary numbers
 results %>% 
