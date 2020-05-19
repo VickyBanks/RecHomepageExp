@@ -6,7 +6,8 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200413','20200513');
+('20200406','20200412');
+-- 2020-04-06 to 2020-05-18
 
 --SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
@@ -754,6 +755,17 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
                    ON a.dt = b.dt AND a.bbc_hid3 = b.bbc_hid3 AND a.visit_id = b.visit_id
 ;
 
+----- Create final table so can push additional weeks of data into it
+/*CREATE TABLE central_insights_sandbox.vb_rec_exp_final AS
+    SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;*/
+
+SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
+
+INSERT INTO central_insights_sandbox.vb_rec_exp_final
+    SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
+
+
+
 ---- Look at results
 SELECT platform, exp_group, count(distinct unique_visitor_cookie_id) AS num_users, count(distinct visit_id) AS num_visits
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
@@ -761,27 +773,6 @@ FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 GROUP BY 1,2;
 
 --SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
-
--- this gives the starts and watches and number of clicks to a module.
--- doens't include people who didn't click
-SELECT dt,
-       click_container,
-       click_think_group,
-       --platform,
-       exp_group,
-       --exp_subgroup,
-       sum(start_flag)   AS num_starts,
-       sum(watched_flag) as num_watched,
-       count(visit_id)   AS num_clicks_to_module
-FROM central_insights_sandbox.vb_exp_valid_watched_enriched
-WHERE click_placement = 'iplayer.tv.page' --homepage
-  AND (click_container = 'module-watching-continue-watching' OR
-       click_container = 'module-recommendations-recommended-for-you'
-    OR click_container = 'module-editorial-featured'
-    OR click_container = 'module-popular-most-popular'
-    OR click_container = 'module-high-priority-bbc-three'
-    OR click_container = 'module-if-you-liked')
-GROUP BY 1, 2,3,4;
 
 SELECT *
 FROM (SELECT
@@ -801,6 +792,8 @@ FROM (SELECT
                  AND click_container = 'module-recommendations-recommended-for-you'
                GROUP BY 1) b ON a.exp_group = b.exp_group
 ORDER BY a.exp_group;
+
+
 ------------------------------------------------  END  --------------------------------------------------------------------------------
 
 -- Data for analysis
@@ -825,15 +818,16 @@ GROUP BY 1, 2,3
 ORDER BY 1,2,3;
 
 --num starts total
-SELECT platform,
+SELECT --platform,
        exp_group,
-       age_range,
+       --age_range,
        sum(start_flag)   as num_starts,
        sum(watched_flag) as num_watched
 FROM central_insights_sandbox.vb_exp_valid_watched_enriched
 WHERE click_container = 'module-recommendations-recommended-for-you'
-GROUP BY 1, 2,3
-ORDER BY 1,2,3;
+AND click_placement = 'iplayer.tv.page' --homepage
+GROUP BY 1--, 2,3
+ORDER BY 1;--,2,3;
 
 -- number of module impressions
 SELECT a.platform,
