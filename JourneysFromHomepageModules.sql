@@ -46,63 +46,6 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
     SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp;
 
--- Issue with finding what think analytics group they're in. For now just keep the variant group.
-
-/*DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
-CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
-SELECT DISTINCT a.*,
-       ISNULL(b.user_experience, 'unknown') AS exp_subgroup
-FROM central_insights_sandbox.vb_rec_exp_ids_temp a
-         LEFT JOIN s3_audience.publisher b
-                   ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
-                      a.visit_id = b.visit_id
-WHERE b.destination = 'PS_IPLAYER'
-  AND (b.user_experience ILIKE '%REC=think%' OR
-       b.user_experience ILIKE 'REC=irex%') --find out what think group they're in, or the in house group
-  AND b.container = 'module-recommendations-recommended-for-you'
-  AND b.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
-                                                                                                   FROM central_insights_sandbox.vb_homepage_rec_date_range)
-  AND (b.metadata ILIKE '%iplayer::bigscreen-html%' OR b.metadata ILIKE '%responsive::iplayer%')
-
-SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids;
-SELECT * FROM central_insights_sandbox.vb_rec_exp_ids WHERE exp_subgroup ISNULL;
-
-DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
-CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
-SELECT DISTINCT b.*,
-                a.user_experience  AS exp_subgroup -- for the visits in the exp, gives what rec they've got from think analytics
-FROM s3_audience.publisher a
-         RIGHT JOIN (SELECT destination, --gives all the visits in the experiment
-                      dt,
-                      unique_visitor_cookie_id,
-                      visit_id,
-                      CASE
-                          WHEN metadata iLIKE '%iplayer::bigscreen-html%' THEN 'bigscreen'
-                          WHEN metadata ILIKE '%responsive::iplayer%' THEN 'web'
-                          END AS platform,
-                      CASE
-                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_1' THEN 'variation_1'
-                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_2' THEN 'variation_2'
-                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::control' THEN 'control'
-                          ELSE 'unknown'
-                          END AS exp_group
-               FROM s3_audience.publisher
-               WHERE dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
-                   AND (SELECT max_date  FROM central_insights_sandbox.vb_homepage_rec_date_range)
-                 AND user_experience ilike '%iplxp_irex1_model1_1%'
-                 AND destination = 'PS_IPLAYER'
-                 AND (metadata ILIKE '%iplayer::bigscreen-html%'
-                   OR metadata ILIKE '%responsive::iplayer%')) b
-              ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id and a.dt = b.dt AND
-                 a.destination = b.destination
-WHERE a.destination = 'PS_IPLAYER'
-  AND (user_experience ILIKE '%REC=think%' OR user_experience ILIKE 'REC=irex%') --find out what think group they're in, or the in house group
-  AND a.container = 'module-recommendations-recommended-for-you'
-  AND a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
-  AND (a.metadata ILIKE '%iplayer::bigscreen-html%' OR a.metadata ILIKE '%responsive::iplayer%')
-ORDER BY a.dt, a.unique_visitor_cookie_id, a.visit_id;
-
-SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids;*/
 
 -- Add age and hid into sample IDs as user's are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
@@ -768,7 +711,7 @@ INSERT INTO central_insights_sandbox.vb_rec_exp_final
 
 ---- Look at results
 SELECT platform, exp_group, count(distinct unique_visitor_cookie_id) AS num_users, count(distinct visit_id) AS num_visits
-FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+FROM central_insights_sandbox.vb_rec_exp_final
 --FROM central_insights_sandbox.vb_rec_exp_ids_hid
 GROUP BY 1,2;
 
@@ -787,7 +730,7 @@ FROM (SELECT
                       sum(start_flag)   AS num_starts,
                       sum(watched_flag) as num_watched,
                       count(visit_id)   AS num_clicks_to_module
-               FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+               FROM central_insights_sandbox.vb_rec_exp_final
                WHERE click_placement = 'iplayer.tv.page' --homepage
                  AND click_container = 'module-recommendations-recommended-for-you'
                GROUP BY 1) b ON a.exp_group = b.exp_group
@@ -823,7 +766,7 @@ SELECT --platform,
        --age_range,
        sum(start_flag)   as num_starts,
        sum(watched_flag) as num_watched
-FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+FROM central_insights_sandbox.vb_rec_exp_final
 WHERE click_container = 'module-recommendations-recommended-for-you'
 AND click_placement = 'iplayer.tv.page' --homepage
 GROUP BY 1--, 2,3
@@ -845,7 +788,7 @@ SELECT platform,
        exp_group,
        age_range,
        count(visit_id) AS num_clicks
-FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+FROM central_insights_sandbox.vb_rec_exp_final
 WHERE click_container = 'module-recommendations-recommended-for-you'
 GROUP BY 1, 2,3
 ORDER BY 1,2,3;
@@ -862,7 +805,7 @@ SELECT platform,
        bbc_hid3,
        sum(start_flag)   as num_starts,
        sum(watched_flag) as num_watched
-FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+FROM central_insights_sandbox.vb_rec_exp_final
 WHERE click_container = 'module-recommendations-recommended-for-you'
 GROUP BY 1, 2, 3,4;
 
@@ -887,8 +830,8 @@ GROUP BY 1,2;
 
 
 SELECT platform, exp_group, click_think_group, sum(start_flag) as num_starts, sum(watched_flag) as num_watched
-FROM central_insights_sandbox.vb_exp_valid_watched_enriched
+FROM central_insights_sandbox.vb_rec_exp_final
 WHERE click_think_group IS NOT NULL
 GROUP By 1,2,3;
 
-SELECT DISTINCT dt FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final;
