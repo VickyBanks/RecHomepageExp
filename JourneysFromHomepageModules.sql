@@ -6,7 +6,7 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200406','20200412');
+('20200406','20200518');
 -- 2020-04-06 to 2020-05-18
 
 --SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
@@ -703,11 +703,13 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;*/
 
 SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_exp_valid_watched_enriched ORDER BY 1;
 
 INSERT INTO central_insights_sandbox.vb_rec_exp_final
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final ORDER BY 1;
 
-
+------------------------------------------------  END  --------------------------------------------------------------------------------
 
 ---- Look at results
 SELECT platform, exp_group, count(distinct unique_visitor_cookie_id) AS num_users, count(distinct visit_id) AS num_visits
@@ -717,8 +719,16 @@ GROUP BY 1,2;
 
 --SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
 
-SELECT *
+SELECT
+       --a.platform,
+       a.exp_group,
+       num_hids AS num_signed_in_users,
+       num_visits,
+       num_starts,
+       num_watched,
+       num_clicks_to_module
 FROM (SELECT
+             --platform,
              exp_group,
              count(distinct bbc_hid3)                   as num_hids,
              count(distinct unique_visitor_cookie_id)   as num_uv,
@@ -726,6 +736,7 @@ FROM (SELECT
       FROM central_insights_sandbox.vb_rec_exp_ids_hid
       GROUP BY 1) a
          JOIN (SELECT
+                      --platform,
                       exp_group,
                       sum(start_flag)   AS num_starts,
                       sum(watched_flag) as num_watched,
@@ -733,11 +744,12 @@ FROM (SELECT
                FROM central_insights_sandbox.vb_rec_exp_final
                WHERE click_placement = 'iplayer.tv.page' --homepage
                  AND click_container = 'module-recommendations-recommended-for-you'
-               GROUP BY 1) b ON a.exp_group = b.exp_group
-ORDER BY a.exp_group;
+               GROUP BY 1) b ON a.exp_group = b.exp_group --AND a.platform = b.platform
+ORDER BY --a.platform,
+         a.exp_group;
 
 
-------------------------------------------------  END  --------------------------------------------------------------------------------
+
 
 -- Data for analysis
 -- Check dates
@@ -782,6 +794,7 @@ JOIN central_insights_sandbox.vb_rec_exp_ids_hid b  on a.dt = b.dt AND a.bbc_hid
 WHERE a.container = 'module-recommendations-recommended-for-you'
 GROUP BY 1, 2,3
 ORDER BY 1,2,3;
+SELECT * FROM central_insights_sandbox.vb_module_impressions LIMIT 10;
 
 -- Number of module clicks
 SELECT platform,
@@ -798,7 +811,8 @@ ORDER BY 1,2,3;
 
 
 -- Temp table giving number of starts and watched for each hid
-CREATE TEMP TABLE vb_rec_exp_module_clicks AS
+DROP TABLE IF EXISTS vb_rec_exp_module_clicks;
+CREATE TABLE vb_rec_exp_module_clicks AS
 SELECT platform,
        exp_group,
        age_range,
@@ -806,10 +820,11 @@ SELECT platform,
        sum(start_flag)   as num_starts,
        sum(watched_flag) as num_watched
 FROM central_insights_sandbox.vb_rec_exp_final
-WHERE click_container = 'module-recommendations-recommended-for-you'
+--WHERE click_container = 'module-recommendations-recommended-for-you'
 GROUP BY 1, 2, 3,4;
 
-CREATE TEMP TABLE vb_rec_exp_results AS
+DROP TABLE IF EXISTS vb_rec_exp_results;
+CREATE TABLE vb_rec_exp_results AS
 SELECT DISTINCT a.platform,
                 a.exp_group,
                 a.age_range,
@@ -828,10 +843,44 @@ SELECT platform, exp_group, count(DISTINCT bbc_hid3)
 FROM vb_rec_exp_results
 GROUP BY 1,2;
 
-
+-- clicks to each think group
 SELECT platform, exp_group, click_think_group, sum(start_flag) as num_starts, sum(watched_flag) as num_watched
 FROM central_insights_sandbox.vb_rec_exp_final
 WHERE click_think_group IS NOT NULL
 GROUP By 1,2,3;
 
 SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final;
+
+
+-- Did it change affect the homepage as a whole?
+SELECT
+       a.platform,
+       a.exp_group,
+       num_hids AS num_signed_in_users,
+       num_visits,
+       num_starts,
+       num_watched,
+       num_clicks_to_module
+FROM (SELECT  platform,
+             exp_group,
+             count(distinct bbc_hid3)                   as num_hids,
+             count(distinct unique_visitor_cookie_id)   as num_uv,
+             count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+      FROM central_insights_sandbox.vb_rec_exp_ids_hid
+      GROUP BY 1,2) a
+         JOIN (SELECT platform,
+                      exp_group,
+                      CASE
+                          WHEN click_container = 'module-recommendations-recommended-for-you' THEN 'rec-module'
+                          ELSE 'other-module' END
+                                        AS homepage_module,
+                      sum(start_flag)   AS num_starts,
+                      sum(watched_flag) as num_watched,
+                      count(visit_id)   AS num_clicks_to_module
+               FROM central_insights_sandbox.vb_rec_exp_final
+               WHERE click_placement = 'iplayer.tv.page' --homepage
+               GROUP BY 1, 2, 3) b ON a.exp_group = b.exp_group AND a.platform = b.platform
+WHERE b.homepage_module != 'rec-module'
+ORDER BY
+         a.platform,
+         a.exp_group;
