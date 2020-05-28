@@ -552,7 +552,7 @@ UPDATE central_insights_sandbox.vb_exp_clicks_linked_starts_valid
 SET content_attribute = (CASE
                              WHEN content_attribute IS NULL THEN 'no-start-flag'
                              ELSE content_attribute END);
-SELECT * FROM  central_insights_sandbox.vb_exp_clicks_linked_starts_valid LIMIT 100;
+
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_starts;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_starts AS
 SELECT dt,
@@ -730,6 +730,38 @@ INSERT INTO central_insights_sandbox.vb_rec_exp_final
 SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final ORDER BY 1;
 
 ------------------------------------------------  END  --------------------------------------------------------------------------------
+
+--- Delete middle tables
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_temp;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
+DROP TABLE IF EXISTS vb_exp_multiple_variants;
+DROP TABLE IF EXISTS vb_result_multiple_exp_groups;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_clicks;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_web_complete;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_deeplinks_temp;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_deeplinks;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_all_content_clicks;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_play_starts;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_and_starts_temp;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_and_starts;
+DROP TABLE IF EXISTS vb_temp_starts;
+DROP TABLE IF EXISTS vb_temp_clicks;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp2;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp3;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_starts;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_play_watched;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_starts_and_watched;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_temp;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_temp2;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
+-------- End of delete
+
+
 
 ---- Look at results
 SELECT platform, exp_group, count(distinct unique_visitor_cookie_id) AS num_users, count(distinct visit_id) AS num_visits
