@@ -492,19 +492,19 @@ CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp AS
 SELECT *,
        CASE
            WHEN content_attribute = 'iplxp-ep-started' THEN row_number()
-                                                            over (PARTITION BY dt,unique_visitor_cookie_id,hashed_id, visit_id,click_event_position ORDER BY content_start_diff)
+                                                            over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, visit_id,click_event_position ORDER BY content_start_diff)
            ELSE 1 END AS duplicate_count
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_temp
-ORDER BY dt, hashed_id, visit_id, content_start_event_position;
-
+ORDER BY dt, bbc_hid3, visit_id, content_start_event_position;
 
 -- Remove duplicates
 -- Values with no start flag need to be kept so they're given duplicate_count = 1
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp2;
-CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_temp2 AS
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp2 AS
 SELECT *
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp
 WHERE duplicate_count = 1;
+
 
 -- Prevent one start being joined to multiple clicks
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp3;
@@ -512,9 +512,9 @@ CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_temp3 AS
 SELECT *,
        CASE
            WHEN content_attribute = 'iplxp-ep-started' THEN row_number()
-                                                            over (PARTITION BY dt,unique_visitor_cookie_id,hashed_id, visit_id, content_start_event_position ORDER BY content_start_diff)
+                                                            over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, visit_id, content_start_event_position ORDER BY content_start_diff)
            ELSE 1 END AS duplicate_count2
-FROM central_insights_sandbox.vb_journey_clicks_linked_starts_temp2;
+FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp2;
 
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
 CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid AS
@@ -613,7 +613,7 @@ FROM central_insights_sandbox.vb_exp_valid_starts a
 WHERE start_watched_diff >= 0
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.click_event_position;
 
-
+SELECT * FROM central_insights_sandbox.vb_exp_starts_and_watched LIMIT 5;
 
 -- Deduplicate to prevent any watched flag from being joined to multiple starts or vice versa
 -- Prevent one start being joined to multiple watched
@@ -621,10 +621,11 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_temp;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_temp AS
 SELECT dt,
        unique_visitor_cookie_id,
-       hashed_id,
+       bbc_hid3,
        visit_id,
-       click_episode_id,
+       click_think_group,
        click_event_position,
+       click_container,
        click_placement,
        content_placement,
        content_id,
@@ -641,17 +642,17 @@ CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_temp2 AS
 SELECT *,
        CASE
            WHEN start_flag = 'iplxp-ep-started' AND watched_flag = 'iplxp-ep-watched' THEN
-                       row_number() over (partition by dt,unique_visitor_cookie_id,hashed_id, visit_id, content_watched_event_position ORDER BY (content_watched_event_position - content_start_event_position))
+                       row_number() over (partition by dt,unique_visitor_cookie_id,bbc_hid3, visit_id, content_watched_event_position ORDER BY (content_watched_event_position - content_start_event_position))
            ELSE 1 END AS duplicate_count2
 FROM central_insights_sandbox.vb_exp_valid_watched_temp
-    ORDER BY dt,unique_visitor_cookie_id,hashed_id, visit_id, content_start_event_position;
+    ORDER BY dt,unique_visitor_cookie_id,bbc_hid3, visit_id, content_start_event_position;
 
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched AS
-    SELECT * FROM central_insights_sandbox.vb_journey_valid_watched_temp2
+    SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_temp2
         WHERE duplicate_count2 = 1;
 
-SELECT * FROM central_insights_sandbox.vb_exp_valid_watched LIMIT 5;
+
 INSERT INTO central_insights_sandbox.vb_exp_valid_watched
 SELECT dt,
        unique_visitor_cookie_id,
@@ -723,6 +724,8 @@ SELECT DISTINCT dt FROM central_insights_sandbox.vb_exp_valid_watched_enriched O
 
 INSERT INTO central_insights_sandbox.vb_rec_exp_final
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
+
+
 SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final ORDER BY 1;
 
 ------------------------------------------------  END  --------------------------------------------------------------------------------
