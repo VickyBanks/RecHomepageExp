@@ -188,7 +188,7 @@ FROM central_insights_sandbox.vb_module_impressions
 GROUP BY dt, platform,container, age_range
 ;*/
 
----------------------------------------- Step 3: Linking the click to content to the episode start ----------------------------------------
+---------------------------------------- Step 3: Identify all the clicks to content ---------------------------------------
 
 -- Need to identify all the clicks to content and link them to the ixpl-start flag.
 -- Need all the clicks, not just from homepage, to make sure a click from homepage is not incorrectly linked to (for exmaple) content autoplaying.
@@ -380,7 +380,7 @@ FROM central_insights_sandbox.vb_exp_deeplinks;
 --SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks ORDER BY visit_id, event_position LIMIT 100;
 
 
--------------------------------------- Select all the ixpl-start impressions and link them back to the click to content -----------------------------------------------------------------
+-------------------------------------- Step 4: Select all the ixpl-start impressions and link them back to the click to content -----------------------------------------------------------------
 
 -- For every dt/user/visit combination find all the ixpl start labels from the user group
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_play_starts;
@@ -572,7 +572,7 @@ SELECT dt,
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
 
 
----------------------------------------------------  Add in watched flags and validate them -------------------------------------------------
+--------------------------------------  Step 5: Get all watched flags and join to start flags -------------------------------------------------
 
 -- For every dt/user/visit combination find all the ixpl watched labels
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_play_watched;
@@ -597,7 +597,6 @@ ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
 
 
 -- Join the watch events to the validated start events, ensuring the same content_id
--- Deduplcate to make sure one watched flag isn't joined to two start flag
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_starts_and_watched;
 CREATE TABLE central_insights_sandbox.vb_exp_starts_and_watched AS
 SELECT a.*,
@@ -620,7 +619,7 @@ ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.click_event_position;
 
 
 
--- Prevents any watched flag from being joined to multiple starts or vice versa
+-- Deduplicate to prevent any watched flag from being joined to multiple starts or vice versa
 -- Prevent one start being joined to multiple watched
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_temp;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_temp AS
