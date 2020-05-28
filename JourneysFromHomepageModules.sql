@@ -1,6 +1,6 @@
 --- Script to look at journeys to playback from the recommended section on homepage for the experiment iplxp_irex1_model1_1
 
--- Initially set a date range table for ease of changing later
+-- Step 0: Initially set a date range table for ease of changing later
 DROP TABLE IF EXISTS central_insights_sandbox.vb_homepage_rec_date_range;
 create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
@@ -12,7 +12,7 @@ insert into central_insights_sandbox.vb_homepage_rec_date_range values
 --SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
 
------------------------------------------  Identify the user group -----------------------------
+----------------------------------------- Step 1: Identify the user group -----------------------------
 
 -- Identify the users and visits within the exp groups for the experiment flag '%iplxp_irex1_model1_1%'
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_temp;
@@ -47,7 +47,7 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
     SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp;
 
 
--- Add age and hid into sample IDs as user's are categorised based on hid not UV.
+-- Add age and hid into sample IDs as users are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid  AS
@@ -150,7 +150,7 @@ FROM (SELECT DISTINCT bbc_hid3, count(DISTINCT age_range) AS num_age_ranges
 
 
 
-------------------------------------------------------- Impressions - web only--------------------------------------------------------------------------------------------
+------------------------------------------------------- Step 2: Impressions - Web only--------------------------------------------------------------------------------------------
 -- Get all impressions to the each module for this exp group
 DROP TABLE IF EXISTS central_insights_sandbox.vb_module_impressions;
 CREATE TABLE central_insights_sandbox.vb_module_impressions AS
@@ -188,13 +188,14 @@ FROM central_insights_sandbox.vb_module_impressions
 GROUP BY dt, platform,container, age_range
 ;*/
 
-----------------------------------------  Linking the click to content to the episode start ----------------------------------------
+---------------------------------------- Step 3: Linking the click to content to the episode start ----------------------------------------
 
 -- Need to identify all the clicks to content and link them to the ixpl-start flag.
 -- Need all the clicks, not just from homepage, to make sure a click from homepage is not incorrectly linked to (for exmaple) content autoplaying.
 -- Need to eliminate clicks from the TLEO because these are a middle step from homepage.
 
 -- For the recommended module we need to know what recommendation group the content was in - this comes in the user_experience field.
+
 -- All standard clicks
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
 CREATE TABLE central_insights_sandbox.vb_exp_content_clicks AS
@@ -204,7 +205,7 @@ SELECT DISTINCT a.dt,
                 a.visit_id,
                 a.event_position,
                 CASE
-                    WHEN a.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked'
+                    WHEN a.container iLIKE '%module-if-you-liked%' THEN 'module-if-you-liked' --simplify this group
                     ELSE a.container END AS container,
                 a.attribute,
                 a.placement,
@@ -221,8 +222,6 @@ WHERE (a.attribute LIKE 'content-item%' OR a.attribute LIKE 'start-watching%' OR
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
 AND a.placement NOT ILIKE '%tleo%' -- we need homepage-episode, ignoring any TLEO middle step
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
-
---SELECT * FROM central_insights_sandbox.vb_exp_content_clicks ORDER BY dt, visit_id, event_position LIMIT 500;
 
 -- Clicks can come from the autoplay system starting an episode
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_autoplay_clicks;
@@ -276,8 +275,9 @@ FROM s3_audience.publisher a
          JOIN central_insights_sandbox.vb_rec_exp_ids_hid  b -- this is to bring in only those visits in our journey table
               ON a.dt = b.dt AND a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND
                  b.visit_id = a.visit_id
-WHERE a.attribute LIKE '%onward-journey-panel~complete%'
-  AND a.publisher_impressions = 1
+WHERE ((a.attribute LIKE '%onward-journey-panel~complete%'
+  AND a.publisher_impressions = 1) OR (a.attribute LIKE '%onward-journey-panel~select%'
+  AND a.publisher_click = 1))
   AND a.destination = b.destination
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
@@ -407,9 +407,6 @@ WHERE a.publisher_impressions = 1
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
 
---SELECT visit_id, COUNT(*) FROM central_insights_sandbox.vb_exp_play_starts GROUP BY visit_id; --70,228 - seems high
---SELECT * FROM central_insights_sandbox.vb_exp_play_starts WHERE visit_id = 18960542 ORDER BY visit_id, event_position;
-
 -- Join clicks and starts into one master table. (some clicks will not be to a content page i.e homepage > TLEO and will be dealt with later)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_and_starts_temp;
 -- Add in start events
@@ -488,32 +485,46 @@ FROM vb_temp_clicks a
                                                           THEN a.row_number = b.row_number - 1 -- Click is row above start - if you can't check IDs or master brands, just link with row above (click is one above start)
                           END
 WHERE content_start_diff >= 0 -- For the null cases with no matching start flag the value given = 0.
---AND (a.visit_id = 14308991 OR a.visit_id = 21656571 OR a.visit_id = 23192602);
 ORDER BY a.visit_id, a.event_position
 ;
 
 
--- Need to deduplicate as multiple clicks to one piece of content could only result one ixpl-start flag
+-- Prevent the join over counting
+-- Prevent one click being joined to multiple starts
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp;
 CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp AS
 SELECT *,
        CASE
            WHEN content_attribute = 'iplxp-ep-started' THEN row_number()
-                                                            over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, visit_id,click_event_position ORDER BY content_start_diff)
+                                                            over (PARTITION BY dt,unique_visitor_cookie_id,hashed_id, visit_id,click_event_position ORDER BY content_start_diff)
            ELSE 1 END AS duplicate_count
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_temp
-ORDER BY dt, bbc_hid3, visit_id, content_start_event_position;
+ORDER BY dt, hashed_id, visit_id, content_start_event_position;
 
 
 -- Remove duplicates
 -- Values with no start flag need to be kept so they're given duplicate_count = 1
-DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
-CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid AS
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp2;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_temp2 AS
 SELECT *
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp
 WHERE duplicate_count = 1;
 
---SELECT * FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid  WHERE (visit_id = 2102182 OR visit_id = 2932254);
+-- Prevent one start being joined to multiple clicks
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_temp3;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_temp3 AS
+SELECT *,
+       CASE
+           WHEN content_attribute = 'iplxp-ep-started' THEN row_number()
+                                                            over (PARTITION BY dt,unique_visitor_cookie_id,hashed_id, visit_id, content_start_event_position ORDER BY content_start_diff)
+           ELSE 1 END AS duplicate_count2
+FROM central_insights_sandbox.vb_journey_clicks_linked_starts_temp2;
+
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid AS
+SELECT *
+FROM central_insights_sandbox.vb_exp_clicks_linked_starts_temp3
+WHERE duplicate_count2 = 1;
 
 -- The above ensures each start is only joined with one click, but there may be multiple clicks to the same content, with only one resulting in a start (start closest to click is chosen)
 -- These need to be joined back in as clicks that had no start
@@ -559,14 +570,6 @@ SELECT dt,
        content_id,
        content_start_event_position
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
-
---SELECT * FROM central_insights_sandbox.vb_exp_valid_starts limit 5;
-
-/*SELECT click_container, content_attribute, count(visit_id) AS num_clicks
-FROM central_insights_sandbox.vb_exp_valid_starts
-    WHERE click_placement = 'iplayer.tv.page' --homepage
-    GROUP BY 1,2;*/
-
 
 
 ---------------------------------------------------  Add in watched flags and validate them -------------------------------------------------
@@ -616,10 +619,45 @@ WHERE start_watched_diff >= 0
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.click_event_position;
 
 
--- Prevents any watched flag from being joined to multiple starts
--- If more than one start occurs for an ID this removes the one not matched to the watched. So those will need to be added back in to ensure one start without a watched and one with.
+
+-- Prevents any watched flag from being joined to multiple starts or vice versa
+-- Prevent one start being joined to multiple watched
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_temp;
+CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_temp AS
+SELECT dt,
+       unique_visitor_cookie_id,
+       hashed_id,
+       visit_id,
+       click_episode_id,
+       click_event_position,
+       click_placement,
+       content_placement,
+       content_id,
+       content_start_event_position,
+       content_watched_event_position,
+       content_attribute  AS start_flag,
+       content_attribute2 AS watched_flag
+FROM central_insights_sandbox.vb_exp_starts_and_watched
+WHERE duplicate_count = 1;
+
+-- prevents one watched being joined to multiple starts
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_temp2;
+CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_temp2 AS
+SELECT *,
+       CASE
+           WHEN start_flag = 'iplxp-ep-started' AND watched_flag = 'iplxp-ep-watched' THEN
+                       row_number() over (partition by dt,unique_visitor_cookie_id,hashed_id, visit_id, content_watched_event_position ORDER BY (content_watched_event_position - content_start_event_position))
+           ELSE 1 END AS duplicate_count2
+FROM central_insights_sandbox.vb_exp_valid_watched_temp
+    ORDER BY dt,unique_visitor_cookie_id,hashed_id, visit_id, content_start_event_position;
+
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched AS
+    SELECT * FROM central_insights_sandbox.vb_journey_valid_watched_temp2
+        WHERE duplicate_count2 = 1;
+
+SELECT * FROM central_insights_sandbox.vb_exp_valid_watched LIMIT 5;
+INSERT INTO central_insights_sandbox.vb_exp_valid_watched
 SELECT dt,
        unique_visitor_cookie_id,
        bbc_hid3,
@@ -633,24 +671,7 @@ SELECT dt,
        content_start_event_position,
        content_watched_event_position,
        content_attribute  AS start_flag,
-       content_attribute2 AS watched_flag
-FROM central_insights_sandbox.vb_exp_starts_and_watched
-WHERE duplicate_count = 1;
-
-
-INSERT INTO central_insights_sandbox.vb_exp_valid_watched
-SELECT dt,
-       unique_visitor_cookie_id,
-       bbc_hid3,
-       visit_id,
-       click_think_group,
-       click_event_position,
-       click_container,
-       click_placement,
-       content_placement,
-       content_id,
-       content_start_event_position,
-       content_watched_event_position
+       CAST(null as varchar) AS watched_flag
 FROM (
          SELECT a.*,b.content_watched_event_position, b.visit_id as missing_flag
          FROM central_insights_sandbox.vb_exp_valid_starts a
