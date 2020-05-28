@@ -85,8 +85,6 @@ FROM (SELECT dt, bbc_hid3, visit_id, count(DISTINCT exp_group) AS num_groups
     ORDER BY num_groups DESC)
 GROUP BY 1, 2
 ORDER BY 1,2;
---SELECT * FROM vb_exp_multiple_variants;
-----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- Add helper columns
 ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
@@ -349,7 +347,7 @@ SELECT dt,
        next_ep_id AS click_destination_id
 FROM central_insights_sandbox.vb_exp_autoplay_clicks;
 
-SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks WHERE attribute ILIKE '%squeeze-auto-play%' LIMIT 10;
+
 -- Web autoplay
 INSERT INTO central_insights_sandbox.vb_exp_all_content_clicks
 SELECT dt,
@@ -376,8 +374,6 @@ SELECT dt,
        click_result                AS click_destination_id
 FROM central_insights_sandbox.vb_exp_deeplinks;
 
-
---SELECT * FROM central_insights_sandbox.vb_exp_all_content_clicks ORDER BY visit_id, event_position LIMIT 100;
 
 
 -------------------------------------- Step 4: Select all the ixpl-start impressions and link them back to the click to content -----------------------------------------------------------------
