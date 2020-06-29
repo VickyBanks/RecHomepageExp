@@ -6,15 +6,32 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200406','20200518');
+('20200618','20200628');
 -- 2020-04-06 to 2020-05-18
 
---SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
+SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
+
+--- Create VMB table
+DROP TABLE IF EXISTS central_insights_sandbox.vb_vmb_exp_temp;
+CREATE TABLE central_insights_sandbox.vb_vmb_exp_temp AS
+SELECT DISTINCT master_brand_name,
+                master_brand_id,
+                brand_title,
+                brand_id,
+                series_title,
+                series_id,
+                episode_id,
+                episode_title,
+                --programme_duration,
+                pips_genre_level_1_names
+FROM prez.scv_vmb;
+
+
 
 ----------------------------------------- Step 1: Identify the user group -----------------------------
 
--- Identify the users and visits within the exp groups for the experiment flag '%iplxp_irex1_model1_1%'
+-- Identify the users and visits within the exp groups for the experiment flag '%iplxp_irex1_model1_2%'
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_temp;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
     SELECT DISTINCT destination, --gives all the visits in the experiment
@@ -22,25 +39,29 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
                       unique_visitor_cookie_id,
                       visit_id,
                       CASE
-                          WHEN metadata iLIKE '%iplayer::bigscreen-html%' THEN 'bigscreen'
-                          WHEN metadata ILIKE '%responsive::iplayer%' THEN 'web'
+                          WHEN metadata iLIKE '%bigscreen-html%' THEN 'bigscreen'
+                          WHEN metadata ILIKE '%responsive%' THEN 'web'
                           --WHEN metadata ILIKE '%mobile%' THEN 'mobile'
+                          ELSE 'unknown'
                           END AS platform,
                       CASE
-                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_1' THEN 'variation_1'
-                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_2' THEN 'variation_2'
-                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::control' THEN 'control'
+                          WHEN user_experience = 'EXP=iplxp_irex_model1_2::variation_1' THEN 'variation_1'
+                          WHEN user_experience = 'EXP=iplxp_irex_model1_2::variation_2' THEN 'variation_2'
+                          WHEN user_experience = 'EXP=iplxp_irex_model1_2::control' THEN 'control'
                           ELSE 'unknown'
                           END AS exp_group
                FROM s3_audience.publisher
                WHERE dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
                    AND (SELECT max_date  FROM central_insights_sandbox.vb_homepage_rec_date_range)
-                 AND user_experience ilike '%iplxp_irex1_model1_1%'
+                 AND user_experience ilike '%iplxp_irex_model1_2%'
                  AND destination = 'PS_IPLAYER'
-                 AND (metadata ILIKE '%iplayer::bigscreen-html%'
-                   OR metadata ILIKE '%responsive::iplayer%');
+                 AND (metadata ILIKE '%bigscreen-html%'
+                   OR metadata ILIKE '%responsive%' OR metadata ISNULL);
 
-SELECT count(*) FROM central_insights_sandbox.vb_rec_exp_ids_temp WHERE dt = 20200427;
+
+
+SELECT dt, platform, count(visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_temp GROUP BY 1,2 ORDER BY 2,1;
+
 --SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp LIMIT 20;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
@@ -169,7 +190,7 @@ WHERE a.destination = 'PS_IPLAYER'
       AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
   AND a.publisher_impressions = 1
   AND placement = 'iplayer.tv.page'--homepage only
-  AND a.metadata ILIKE '%responsive::iplayer%'
+  AND a.metadata ILIKE '%responsive%'
   AND b.platform = 'web'
 ;
 
@@ -275,7 +296,7 @@ FROM s3_audience.publisher a
                  b.visit_id = a.visit_id
 WHERE ((a.attribute LIKE '%onward-journey-panel~complete%'
   AND a.publisher_impressions = 1) OR (a.attribute LIKE '%onward-journey-panel~select%'
-  AND a.publisher_click = 1))
+  AND a.publisher_clicks = 1))
   AND a.destination = b.destination
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
@@ -396,12 +417,13 @@ SELECT DISTINCT a.dt,
 FROM s3_audience.publisher a
          JOIN central_insights_sandbox.vb_rec_exp_ids_hid  b
               ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.dt = b.dt AND a.visit_id = b.visit_id
-LEFT JOIN central_insights_sandbox.vb_vmb_temp c ON a.result = c.episode_id
+LEFT JOIN central_insights_sandbox.vb_vmb_exp_temp c ON a.result = c.episode_id
 WHERE a.publisher_impressions = 1
   AND a.attribute = 'iplxp-ep-started'
   AND a.destination = 'PS_IPLAYER'
   AND a.dt BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
 ORDER BY a.dt, b.bbc_hid3, a.visit_id, a.event_position;
+
 
 -- Join clicks and starts into one master table. (some clicks will not be to a content page i.e homepage > TLEO and will be dealt with later)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_and_starts_temp;
@@ -500,6 +522,7 @@ SELECT *,
 FROM central_insights_sandbox.vb_exp_clicks_linked_starts_temp
 ORDER BY dt, bbc_hid3, visit_id, content_start_event_position;
 
+
 -- Update table so duplicate joins have the ixpl-ep-started label set to null.
 -- If two clicks are joined to the same start, make null the record for row with the largest content_start_diff as this is an incorrect join.
 -- This retains both clicks and just the one start
@@ -518,11 +541,12 @@ DELETE FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp
 WHERE duplicate_count != 1;
 
 -- The clicks and starts are now validated
-CREATE TABLE central_insights_sandbox.vb_journey_clicks_linked_starts_valid
+DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_clicks_linked_starts_valid;
+CREATE TABLE central_insights_sandbox.vb_exp_clicks_linked_starts_valid
 AS SELECT * FROM central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp;
 
 -- Define value if there's no start
-UPDATE central_insights_sandbox.vb_journey_clicks_linked_starts_valid
+UPDATE central_insights_sandbox.vb_exp_clicks_linked_starts_valid
 SET content_attribute = (CASE
                              WHEN content_attribute IS NULL THEN 'no-start-flag'
                              ELSE content_attribute END);
@@ -609,7 +633,6 @@ WHERE duplicate_count2 != 1;
 DELETE FROM central_insights_sandbox.vb_exp_starts_and_watched
 WHERE duplicate_count != 1;
 
-
 -- Simplify table columns
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched AS
@@ -626,8 +649,9 @@ SELECT dt,
        content_start_event_position,
        content_watched_event_position,
        content_attribute  AS start_flag,
-       CAST(null as varchar) AS watched_flag
+       watched_flag
 FROM central_insights_sandbox.vb_exp_starts_and_watched;
+
 
 --In case any null values have slipped through
 UPDATE central_insights_sandbox.vb_exp_valid_watched
@@ -673,24 +697,13 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2 AS
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
 
 
---- Model 1 table to keep for now.
+
+/*--- Model 1 table to keep for now.
 CREATE TABLE central_insights_sandbox.vb_rec_exp_final_iplxp_irex1_model1_1
 AS SELECT * FROM central_insights_sandbox.vb_rec_exp_final;
 
------ Create final table so can push additional weeks of data into it
-/*CREATE TABLE central_insights_sandbox.vb_rec_exp_final AS
-    SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;*/
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex1_model1_1;*/
 
-SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
-SELECT DISTINCT dt FROM central_insights_sandbox.vb_exp_valid_watched_enriched ORDER BY 1;
-
-INSERT INTO central_insights_sandbox.vb_rec_exp_final
-    SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
-
-
-
-
-SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
 ------------------------------------------------  END  --------------------------------------------------------------------------------
 
 --- Delete middle tables
@@ -726,8 +739,8 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
 
 
 ---- Look at results
-SELECT platform, exp_group, count(distinct unique_visitor_cookie_id) AS num_users, count(distinct visit_id) AS num_visits
-FROM central_insights_sandbox.vb_rec_exp_final
+SELECT platform, exp_group, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
+FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2
 --FROM central_insights_sandbox.vb_rec_exp_ids_hid
 GROUP BY 1,2;
 
@@ -755,7 +768,7 @@ FROM (SELECT
                       sum(start_flag)   AS num_starts,
                       sum(watched_flag) as num_watched,
                       count(visit_id)   AS num_clicks_to_module
-               FROM central_insights_sandbox.vb_rec_exp_final
+               FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2
                WHERE click_placement = 'iplayer.tv.page' --homepage
                  AND click_container = 'module-recommendations-recommended-for-you'
                GROUP BY 1) b ON a.exp_group = b.exp_group --AND a.platform = b.platform
