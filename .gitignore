@@ -39,3 +39,6 @@ vignettes/*.pdf
 *.xlsx
 *.docx
 *.csv
+*/.png
+*.R
+*.DS_Store
