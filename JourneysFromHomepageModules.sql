@@ -739,8 +739,15 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
 
 
 ---- Look at results
+--- Make current exp table into generic name for ease
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_final AS
+    SELECT * FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2;
+
+SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
+
 SELECT platform, exp_group, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
-FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2
+FROM central_insights_sandbox.vb_rec_exp_final
 --FROM central_insights_sandbox.vb_rec_exp_ids_hid
 GROUP BY 1,2;
 
@@ -768,7 +775,7 @@ FROM (SELECT
                       sum(start_flag)   AS num_starts,
                       sum(watched_flag) as num_watched,
                       count(visit_id)   AS num_clicks_to_module
-               FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2
+               FROM central_insights_sandbox.vb_rec_exp_final
                WHERE click_placement = 'iplayer.tv.page' --homepage
                  AND click_container = 'module-recommendations-recommended-for-you'
                GROUP BY 1) b ON a.exp_group = b.exp_group --AND a.platform = b.platform
@@ -778,7 +785,55 @@ ORDER BY --a.platform,
 
 
 
--- Data for analysis
+---------- Data for analysis overview -- No platform split  --------------
+SELECT exp_group,
+       count(DISTINCT bbc_hid3) AS num_signed_in_users,
+       count(DISTINCT dt||visit_id) AS num_visits
+FROM central_insights_sandbox.vb_rec_exp_ids_hid
+WHERE exp_group != 'unknown'
+GROUP BY 1
+ORDER BY 1;
+
+SELECT exp_group,
+       sum(start_flag)   as num_starts,
+       sum(watched_flag) as num_watched,
+       count(visit_id) AS num_clicks
+FROM central_insights_sandbox.vb_rec_exp_final
+WHERE click_container = 'module-recommendations-recommended-for-you'
+AND click_placement = 'iplayer.tv.page' --homepage
+GROUP BY 1
+ORDER BY 1;
+
+
+---------- Data for R analysis --------------
+DROP TABLE IF EXISTS vb_rec_exp_results;
+CREATE TABLE vb_rec_exp_results AS
+SELECT DISTINCT a.exp_group,
+                a.bbc_hid3,
+                ISNULL(b.num_starts, 0)   as num_starts,
+                ISNULL(b.num_watched, 0) AS num_watched
+FROM central_insights_sandbox.vb_rec_exp_ids_hid a -- get all users, even those who didn't click
+         LEFT JOIN (SELECT exp_group, bbc_hid3, sum(start_flag) AS num_starts, sum(watched_flag) as num_watched
+                    FROM central_insights_sandbox.vb_rec_exp_final
+                    WHERE click_container = 'module-recommendations-recommended-for-you'
+                      AND click_placement = 'iplayer.tv.page'
+                    GROUP BY 1, 2) b --Gives each user and their total starts/watched from that module
+                   on a.bbc_hid3 = b.bbc_hid3 AND a.exp_group = b.exp_group
+;
+-- Tables for R
+SELECT bbc_hid3, num_starts, num_watched FROM vb_rec_exp_results
+WHERE exp_group = 'control';
+
+SELECT bbc_hid3, num_starts, num_watched FROM vb_rec_exp_results
+WHERE exp_group = 'variation_1';
+
+SELECT bbc_hid3, num_starts, num_watched FROM vb_rec_exp_results
+WHERE exp_group = 'variation_2';
+
+SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_ids_hid;
+
+--------------------------------
+
 -- Check dates
 SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 -- How many hids?
@@ -821,6 +876,7 @@ JOIN central_insights_sandbox.vb_rec_exp_ids_hid b  on a.dt = b.dt AND a.bbc_hid
 WHERE a.container = 'module-recommendations-recommended-for-you'
 GROUP BY 1, 2,3
 ORDER BY 1,2,3;
+
 SELECT * FROM central_insights_sandbox.vb_module_impressions LIMIT 10;
 
 -- Number of module clicks
@@ -862,7 +918,10 @@ FROM central_insights_sandbox.vb_rec_exp_ids_hid a
          LEFT JOIN vb_rec_exp_module_clicks b
                    on a.bbc_hid3 = b.bbc_hid3 AND a.platform = b.platform AND a.exp_group = b.exp_group
 ;
-SELECT * FROM vb_rec_exp_results; --pull out all results and manipulate in R.
+
+SELECT bbc_hid3,num_starts, num_watched FROM vb_rec_exp_results
+WHERE exp_group = 'control'
+; --pull out all results and manipulate in R.
 
 
 

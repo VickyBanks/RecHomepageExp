@@ -39,6 +39,6 @@ vignettes/*.pdf
 *.xlsx
 *.docx
 *.csv
-*/.png
+*.png
 *.R
 *.DS_Store
