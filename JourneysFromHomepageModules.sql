@@ -5,8 +5,9 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_homepage_rec_date_range;
 create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
-insert into central_insights_sandbox.vb_homepage_rec_date_range values
-('20200618','20200628');
+insert into central_insights_sandbox.vb_homepage_rec_date_range
+values ('20200618','20200628'); --V2
+--values('20200406','20200518'); -- V1
 -- 2020-04-06 to 2020-05-18
 
 SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
@@ -49,11 +50,17 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_temp AS
                           WHEN user_experience = 'EXP=iplxp_irex_model1_2::variation_2' THEN 'variation_2'
                           WHEN user_experience = 'EXP=iplxp_irex_model1_2::control' THEN 'control'
                           ELSE 'unknown'
+                        /*WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_1' THEN 'variation_1'
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::variation_2' THEN 'variation_2'
+                          WHEN user_experience = 'EXP=iplxp_irex1_model1_1::control' THEN 'control'
+                          */
                           END AS exp_group
+
                FROM s3_audience.publisher
                WHERE dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
                    AND (SELECT max_date  FROM central_insights_sandbox.vb_homepage_rec_date_range)
                  AND user_experience ilike '%iplxp_irex_model1_2%'
+                 --AND user_experience ilike '%iplxp_irex1_model1_1%'
                  AND destination = 'PS_IPLAYER'
                  AND (metadata ILIKE '%bigscreen-html%'
                    OR metadata ILIKE '%responsive%' OR metadata ISNULL);
@@ -692,6 +699,12 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
 ;
 
 -- Final table (labelled with exp name)
+
+DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final_iplxp_irex1_model1_1;
+CREATE TABLE central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1 AS
+    SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
+
+
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2 AS
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
@@ -736,7 +749,18 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
 -------- End of delete
 
+--- Exp v1
+SELECT * FROM central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1;
+CREATE TABLE vb_exp_hids_v1 AS SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid;
 
+
+-- EXP v2
+DROP TABLE IF EXISTS vb_exp_hids_v2;
+CREATE TABLE vb_exp_hids_v2 AS SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid;
+SELECT * FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2 LIMIT 10;
+
+SELECT dt, platform, exp_group, count(visit_id) as num_visits FROM vb_exp_hids_v2 GROUP BY 1,2,3 ORDER BY 1,2,3;
+SELECT dt, platform, exp_group, count(visit_id) as num_visits FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2 GROUP BY 1,2,3 ORDER BY 1,2,3;
 
 ---- Look at results
 --- Make current exp table into generic name for ease
@@ -804,7 +828,7 @@ AND click_placement = 'iplayer.tv.page' --homepage
 GROUP BY 1
 ORDER BY 1;
 
-
+SELECT distinct click_container FROM central_insights_sandbox.vb_rec_exp_final WHERE click_placement = 'iplayer.tv.page';
 ---------- Data for R analysis --------------
 DROP TABLE IF EXISTS vb_rec_exp_results;
 CREATE TABLE vb_rec_exp_results AS
@@ -815,18 +839,19 @@ SELECT DISTINCT a.exp_group,
 FROM central_insights_sandbox.vb_rec_exp_ids_hid a -- get all users, even those who didn't click
          LEFT JOIN (SELECT exp_group, bbc_hid3, sum(start_flag) AS num_starts, sum(watched_flag) as num_watched
                     FROM central_insights_sandbox.vb_rec_exp_final
-                    WHERE click_container = 'module-recommendations-recommended-for-you'
+                    WHERE click_container = 'module-editorial-featured' --'module-recommendations-recommended-for-you'
                       AND click_placement = 'iplayer.tv.page'
                     GROUP BY 1, 2) b --Gives each user and their total starts/watched from that module
                    on a.bbc_hid3 = b.bbc_hid3 AND a.exp_group = b.exp_group
 ;
 -- Tables for R
+--control
 SELECT bbc_hid3, num_starts, num_watched FROM vb_rec_exp_results
 WHERE exp_group = 'control';
-
+--variation_1
 SELECT bbc_hid3, num_starts, num_watched FROM vb_rec_exp_results
 WHERE exp_group = 'variation_1';
-
+--variation_2
 SELECT bbc_hid3, num_starts, num_watched FROM vb_rec_exp_results
 WHERE exp_group = 'variation_2';
 
