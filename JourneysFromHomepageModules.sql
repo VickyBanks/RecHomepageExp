@@ -82,9 +82,11 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
 -- Add age and hid into sample IDs as users are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
-CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid  AS
+CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid AS
 SELECT DISTINCT a.*,
                 c.bbc_hid3,
+                CASE WHEN d.frequency_band is null THEN 'new' ELSE d.frequency_band END   AS frequency_band,
+                central_insights_sandbox.udf_dataforce_frequency_groups(d.frequency_band) AS frequency_group_aggregated,
                 CASE
                     WHEN c.age >= 35 THEN '35+'
                     WHEN c.age <= 10 THEN 'under 10'
@@ -92,16 +94,23 @@ SELECT DISTINCT a.*,
                     WHEN c.age >= 16 AND c.age <= 24 THEN '16-24'
                     WHEN c.age >= 25 AND c.age <= 34 then '25-34'
                     ELSE 'unknown'
-                    END AS age_range
+                    END                                                                   AS age_range
 FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
          JOIN (SELECT DISTINCT dt, unique_visitor_cookie_id, visit_id, audience_id, destination
                FROM s3_audience.visits
-               WHERE destination = 'PS_IPLAYER' AND dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
-                                                                                                   FROM central_insights_sandbox.vb_homepage_rec_date_range)) b -- get the audience_id
-              ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id AND a.dt = b.dt AND a.destination = b.destination
+               WHERE destination = 'PS_IPLAYER'
+                 AND dt between (SELECT min_date
+                                 FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
+                                                                                                FROM central_insights_sandbox.vb_homepage_rec_date_range)) b -- get the audience_id
+              ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id AND a.dt = b.dt AND
+                 a.destination = b.destination
          JOIN prez.id_profile c ON b.audience_id = c.bbc_hid3
+         JOIN iplayer_sandbox.iplayer_weekly_frequency_calculations d
+              ON (c.bbc_hid3 = d.bbc_hid3 and
+                  trunc(date_trunc('week', cast(a.dt as date))) = d.date_of_segmentation)
 ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
+
 
 -- Some visits end up sending two or three experiment flags. When the signed in user is switched.
 -- For 2020-04-06 to 2020-04-27 the number of bbc3_hids/visit combinations with more than one ID was 0.8%.
@@ -681,6 +690,8 @@ CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_enriched AS
 SELECT a.dt,
        a.unique_visitor_cookie_id,
        a.bbc_hid3,
+       b.frequency_band,
+       b.frequency_group_aggregated,
        a.visit_id,
        a.click_think_group,
        a.click_event_position,
@@ -774,15 +785,7 @@ SELECT dt, platform, exp_group, count(visit_id) as num_visits FROM central_insig
 --- Make current exp table into generic name for ease
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_final AS
-SELECT a.*,
-       CASE WHEN b.frequency_band is null THEN 'new' ELSE b.frequency_band END   AS frequency_band,
-       central_insights_sandbox.udf_dataforce_frequency_groups(b.frequency_band) AS frequency_group_aggregated
-FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2_repeat a
-    -- Add in frequency bands to remove new users
-         LEFT JOIN iplayer_sandbox.iplayer_weekly_frequency_calculations b
-                   ON (a.bbc_hid3 = b.bbc_hid3 and
-                       trunc(date_trunc('week', cast(a.dt as date))) = b.date_of_segmentation)
-;
+SELECT * FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2_repeat;
 
 SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
 
@@ -851,22 +854,22 @@ SELECT distinct click_container FROM central_insights_sandbox.vb_rec_exp_final W
 ---------- Data for R analysis --------------
 DROP TABLE IF EXISTS vb_rec_exp_results;
 CREATE TABLE vb_rec_exp_results AS
-    with module_metrics AS ( SELECT exp_group, bbc_hid3, sum(start_flag) AS num_starts, sum(watched_flag) as num_watched
-                    FROM central_insights_sandbox.vb_rec_exp_final
-                    WHERE click_container = 'module-recommendations-recommended-for-you'
-                      AND click_placement = 'iplayer.tv.page'
-                    GROUP BY 1, 2 )
+with module_metrics AS (SELECT exp_group,
+                               bbc_hid3,
+                               sum(start_flag) AS num_starts, sum(watched_flag) as num_watched
+                        FROM central_insights_sandbox.vb_rec_exp_final
+                        WHERE click_container = 'module-recommendations-recommended-for-you'
+                          AND click_placement = 'iplayer.tv.page'
+                        GROUP BY 1, 2)
 SELECT DISTINCT a.exp_group,
                 a.bbc_hid3,
-                c.frequency_group,
-                c.frequency_group_aggregated,
-                ISNULL(b.num_starts, 0)   as num_starts,
+                ISNULL(b.num_starts, 0)  as num_starts,
                 ISNULL(b.num_watched, 0) AS num_watched
 FROM central_insights_sandbox.vb_rec_exp_ids_hid a -- get all users, even those who didn't click
          LEFT JOIN module_metrics b --Gives each user and their total starts/watched from that module
                    on a.bbc_hid3 = b.bbc_hid3 AND a.exp_group = b.exp_group
-LEFT JOIN central_insights_sandbox.dataforce_journey_complete  c ON a.dt= c.dt and a.visit_id = c.visit_id
-WHERE c.destination = 'PS_IPLAYER'
+WHERE a.frequency_band NOT ILIKE '%dormant%' AND a.frequency_band NOT ILIKE 'new'
+
 ;
 
 SELECT DISTINCT dt FROM central_insights_sandbox.dataforce_journey_complete;
