@@ -85,7 +85,7 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid AS
 SELECT DISTINCT a.*,
                 c.bbc_hid3,
-                CASE WHEN d.frequency_band is null THEN 'new' ELSE d.frequency_band END   AS frequency_band,
+                CASE WHEN d.frequency_band ISNULL THEN 'new' ELSE d.frequency_band END   AS frequency_band,
                 central_insights_sandbox.udf_dataforce_frequency_groups(d.frequency_band) AS frequency_group_aggregated,
                 CASE
                     WHEN c.age >= 35 THEN '35+'
@@ -110,6 +110,7 @@ FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
                   trunc(date_trunc('week', cast(a.dt as date))) = d.date_of_segmentation)
 ORDER BY a.dt, c.bbc_hid3, visit_id
 ;
+
 
 
 -- Some visits end up sending two or three experiment flags. When the signed in user is switched.
@@ -148,6 +149,11 @@ WHERE id_col IN (SELECT id_col FROM vb_result_multiple_exp_groups);
 -- Remove helper column
 ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
 DROP COLUMN id_col;
+
+SELECT frequency_band, count(DISTINCT dt||visit_id)
+FROM central_insights_sandbox.vb_rec_exp_ids_hid
+GROUP BY 1
+ORDER BY 1;
 
 SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid LIMIT 100;
 /*SELECT platform,
@@ -719,6 +725,7 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1
 CREATE TABLE central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2_repeat AS
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;
 
+
 /*DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final_iplxp_irex1_model1_1;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1 AS
     SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched;*/
@@ -788,6 +795,11 @@ CREATE TABLE central_insights_sandbox.vb_rec_exp_final AS
 SELECT * FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2_repeat;
 
 SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
+
+SELECT frequency_band, count(DISTINCT dt||visit_id)
+FROM central_insights_sandbox.vb_rec_exp_final
+GROUP BY 1
+ORDER BY 1;
 
 
 
@@ -863,17 +875,22 @@ with module_metrics AS (SELECT exp_group,
                         GROUP BY 1, 2)
 SELECT DISTINCT a.exp_group,
                 a.bbc_hid3,
+                a.frequency_band,
+                a.frequency_group_aggregated,
                 ISNULL(b.num_starts, 0)  as num_starts,
                 ISNULL(b.num_watched, 0) AS num_watched
 FROM central_insights_sandbox.vb_rec_exp_ids_hid a -- get all users, even those who didn't click
          LEFT JOIN module_metrics b --Gives each user and their total starts/watched from that module
                    on a.bbc_hid3 = b.bbc_hid3 AND a.exp_group = b.exp_group
-WHERE a.frequency_band NOT ILIKE '%dormant%' AND a.frequency_band NOT ILIKE 'new'
-
 ;
 
-SELECT DISTINCT dt FROM central_insights_sandbox.dataforce_journey_complete;
 
+SELECT exp_group,
+       frequency_band,
+       sum(num_starts)  as total_starts,
+       sum(num_watched) as total_watched
+FROM vb_rec_exp_results
+GROUP BY 1, 2;
 
 -- Tables for R
 --control
