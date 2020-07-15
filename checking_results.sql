@@ -1,6 +1,6 @@
 
 --- Exp v1
-SELECT * FROM central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1;
+SELECT * FROM central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1 LIMIT 5;
 SELECT * FROM vb_exp_hids_v1;
 SELECT * FROM vb_exp_impr_v1;
 
@@ -64,8 +64,8 @@ GROUP BY 1,2,3,4;
 
  */
 
- /*
-  in autoplay
+
+ /* in autoplay
   what makes the best rec?
   What did people watch directly after they finished one episode within a session?
   How did those next episodes compare to the previous one.
@@ -73,9 +73,10 @@ GROUP BY 1,2,3,4;
 
   Of the people who discovered something new (new TLEO) how did their session length vary.
   How similar is the new TLEO.
-  time of day?
-  /*
+  time of day?*/
 
 
-  */
 
+SELECT *
+FROM  central_insights.SUMMARY_548DAY_USER_CHANNEL_GENRE_PROG_UAS
+ LIMIT 100;
