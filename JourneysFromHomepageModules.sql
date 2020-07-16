@@ -1,6 +1,23 @@
---- Script to look at journeys to playback from the recommended section on homepage for the experiment iplxp_irex1_model1_1
+/*
+Scrip to follow user journeys from their click to content to starting and completing content.
+Focused on journeys from homepage, identifying which homepage module was clicked and led to viewing
+Created for experimental work so the user's experiment group is identified and carried throughout
 
--- Step 0: Initially set a date range table for ease of changing later
+Step 0: Initially set a date range table for ease of changing later and VMB to guard against pipeline issues
+Step 1: Identify the user group
+Step 2: Impressions - Web only
+Step 3: Identify all the clicks to content
+Step 4: Select all the ixpl-start impressions and link them back to the click to content
+Step 5: Get all watched flags and join to start flags
+Step 6: Simplify table and enrich with user data
+Step 7: END - delete table
+Step 8: Look at results
+Step 9: Data for R Statistical Analysis
+
+
+*/
+
+-- Step 0: Initially set a date range table for ease of changing later and VMB to guard against pipeline issues
 DROP TABLE IF EXISTS central_insights_sandbox.vb_homepage_rec_date_range;
 create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
@@ -615,7 +632,7 @@ WHERE duplicate_count2 != 1;
 DELETE FROM central_insights_sandbox.vb_exp_starts_and_watched
 WHERE duplicate_count != 1;
 
--- Simplify table columns
+--------------------------------------  Step 6: Simplify table and enrich with user data -------------------------------------------------
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched AS
 SELECT dt,
@@ -701,7 +718,7 @@ AS SELECT * FROM central_insights_sandbox.vb_rec_exp_final;
 
 SELECT DISTINCT dt FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex1_model1_1;*/
 
-------------------------------------------------  END  --------------------------------------------------------------------------------
+------------------------------------------------  Step 7 - END - delete table  --------------------------------------------------------------------------------
 
 --- Delete middle tables
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_temp;
@@ -735,7 +752,7 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
 
 
 
------------------------------------------------------------- Look at results ------------------------------------------------------------
+------------------------------------------------------------ Step 8 - Look at results ------------------------------------------------------------
 --- Make current exp table into generic name for ease
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_final AS
@@ -815,7 +832,7 @@ ORDER BY 1;
 
 SELECT distinct click_container FROM central_insights_sandbox.vb_rec_exp_final WHERE click_placement = 'iplayer.tv.page';
 
----------- Data for R Statistical Analysis --------------
+------------------------------ Step 9: Data for R Statistical Analysis --------------------------------------------
 DROP TABLE IF EXISTS vb_rec_exp_results;
 CREATE TABLE vb_rec_exp_results AS
 with module_metrics AS (
