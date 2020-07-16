@@ -80,3 +80,32 @@ GROUP BY 1,2,3,4;
 SELECT *
 FROM  central_insights.SUMMARY_548DAY_USER_CHANNEL_GENRE_PROG_UAS
  LIMIT 100;
+
+SELECT
+       --a.platform,
+       a.exp_group,
+       num_hids AS num_signed_in_users,
+       num_visits,
+       num_starts,
+       num_watched,
+       num_clicks_to_module
+FROM (SELECT
+             --platform,
+             exp_group,
+             count(distinct bbc_hid3)                   as num_hids,
+             count(distinct unique_visitor_cookie_id)   as num_uv,
+             count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+      FROM vb_exp_hids_v1
+      GROUP BY 1) a
+         JOIN (SELECT
+                      --platform,
+                      exp_group,
+                      sum(start_flag)   AS num_starts,
+                      sum(watched_flag) as num_watched,
+                      count(visit_id)   AS num_clicks_to_module
+               FROM central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1
+               WHERE click_placement = 'iplayer.tv.page' --homepage
+                 AND click_container = 'module-recommendations-recommended-for-you'
+               GROUP BY 1) b ON a.exp_group = b.exp_group --AND a.platform = b.platform
+ORDER BY --a.platform,
+         a.exp_group;
