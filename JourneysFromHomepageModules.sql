@@ -6,15 +6,15 @@ create table central_insights_sandbox.vb_homepage_rec_date_range (
     min_date varchar(20),
     max_date varchar(20));
 insert into central_insights_sandbox.vb_homepage_rec_date_range
-values ('20200706','20200714'); --V3
---values ('20200618','20200628'); --V2
---values('20200406','20200518'); -- V1
+values ('20200706','20200714'); --V3 irex (v2 re-run)
+--values ('20200618','20200628'); --V2 irex
+--values('20200406','20200518'); -- V1 irex
 -- 2020-04-06 to 2020-05-18
 
 SELECT * FROM central_insights_sandbox.vb_homepage_rec_date_range;
 --2020-04-06 to
 
---- Create VMB table
+--- Create VMB table for ease (and if the vmb pipeline goes down)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_vmb_exp_temp;
 CREATE TABLE central_insights_sandbox.vb_vmb_exp_temp AS
 SELECT DISTINCT master_brand_name,
@@ -71,15 +71,14 @@ WHERE a.dt between (SELECT min_date FROM central_insights_sandbox.vb_homepage_re
 ;
 
 
-SELECT platform, exp_group, count(visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_temp GROUP BY 1,2 ORDER BY 2,1;
+--SELECT platform, exp_group, count(visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_temp GROUP BY 1,2 ORDER BY 2,1;
 
---SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp LIMIT 20;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids AS
     SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_temp;
 
 
--- Add age and hid into sample IDs as users are categorised based on hid not UV.
+-- Add age, hid and frequency group into sample IDs as users are categorised based on hid not UV.
 -- This will removed non-signed in users (which we want as exp is only for signed in)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_ids_hid;
 CREATE TABLE central_insights_sandbox.vb_rec_exp_ids_hid AS
@@ -101,11 +100,12 @@ FROM central_insights_sandbox.vb_rec_exp_ids a -- all the IDs from publisher
                WHERE destination = 'PS_IPLAYER'
                  AND dt between (SELECT min_date
                                  FROM central_insights_sandbox.vb_homepage_rec_date_range) AND (SELECT max_date
-                                                                                                FROM central_insights_sandbox.vb_homepage_rec_date_range)) b -- get the audience_id
+                                                                                                FROM central_insights_sandbox.vb_homepage_rec_date_range)
+             ) b -- get the audience_id
               ON a.unique_visitor_cookie_id = b.unique_visitor_cookie_id AND a.visit_id = b.visit_id AND a.dt = b.dt AND
                  a.destination = b.destination
-         JOIN prez.id_profile c ON b.audience_id = c.bbc_hid3
-         JOIN iplayer_sandbox.iplayer_weekly_frequency_calculations d
+         JOIN prez.id_profile c ON b.audience_id = c.bbc_hid3 -- gives hid and age
+         JOIN iplayer_sandbox.iplayer_weekly_frequency_calculations d -- give frequency groups
               ON (c.bbc_hid3 = d.bbc_hid3 and
                   trunc(date_trunc('week', cast(a.dt as date))) = d.date_of_segmentation)
 ORDER BY a.dt, c.bbc_hid3, visit_id
@@ -150,51 +150,6 @@ WHERE id_col IN (SELECT id_col FROM vb_result_multiple_exp_groups);
 ALTER TABLE central_insights_sandbox.vb_rec_exp_ids_hid
 DROP COLUMN id_col;
 
-SELECT frequency_band, count(DISTINCT dt||visit_id)
-FROM central_insights_sandbox.vb_rec_exp_ids_hid
-GROUP BY 1
-ORDER BY 1;
-
-SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid LIMIT 100;
-/*SELECT platform,
-       exp_group,
-       count(distinct bbc_hid3)                   as num_hids,
-       count(distinct unique_visitor_cookie_id)   as num_uv,
-       count(distinct dt || bbc_hid3 || visit_id) AS num_visits
-FROM central_insights_sandbox.vb_rec_exp_ids_hid
-GROUP BY 1,2;*/
-
------------------------------------------- Checks - Are any visits lost when adding in age? (test numbers for 020-04-06 to 2020-04-27 )------------------------------------------------
-/*-- How many visits are lost?
-SELECT count(*) FROM vb_result_multiple_exp_groups WHERE num_groups !=1; -- 45,635 visits are lost by removing those with wo groups
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 7,833,679
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --7,656,493
---How many UV are lost
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids); -- 7,420,193
-SELECT COUNT(*) FROM (SELECT DISTINCT dt, unique_visitor_cookie_id FROM central_insights_sandbox.vb_rec_exp_ids_hid); --7,270,261
-
---by platform
-SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM central_insights_sandbox.vb_rec_exp_ids) GROUP BY platform;
---platform,count
--- web, 1,012,852
--- bigscreen, 6,820,827
-
-SELECT platform, COUNT(*) FROM (SELECT DISTINCT dt, platform, visit_id FROM central_insights_sandbox.vb_rec_exp_ids_hid) GROUP BY platform;
---platform,count
--- web, 989,970
--- bigscreen, 6,666,523
-
--- How many hids have more than one age range? SHOULD be as close to zero as possible
-SELECT COUNT(*)
-FROM (SELECT DISTINCT bbc_hid3, count(DISTINCT age_range) AS num_age_ranges
-      FROM central_insights_sandbox.vb_rec_exp_ids_hid
-      GROUP BY bbc_hid3
-      HAVING count(DISTINCT age_range) > 1); --ZERO!!
-
- */
----------------------------------------------------------------------------------------------------------------------------------------------------
-
-
 
 ------------------------------------------------------- Step 2: Impressions - Web only--------------------------------------------------------------------------------------------
 -- Get all impressions to the each module for this exp group
@@ -217,15 +172,15 @@ WHERE a.destination = 'PS_IPLAYER'
     AND (SELECT max_date FROM central_insights_sandbox.vb_homepage_rec_date_range)
   AND a.publisher_impressions = 1
   AND placement = 'iplayer.tv.page'--homepage only
-  --AND a.metadata ILIKE '%responsive%'
+  --AND a.metadata ILIKE '%responsive%' -- metadata field has issues atm so don't use this
   AND b.platform = 'web'
 ;
 
 -- How many visits were there and how many actually saw the rec-module
 /*SELECT count(visit_id) FROM central_insights_sandbox.vb_rec_exp_ids_hid
-    WHERE dt = 20200427 and platform = 'web'; -- 202,103
+    WHERE platform = 'web'; -- 202,103, irex v2 rerun = 2,065,650
 SELECT count(DISTINCT visit_id) FROM central_insights_sandbox.vb_module_impressions
-    WHERE dt = 20200427 AND container = 'module-recommendations-recommended-for-you'; -- 26,416
+    WHERE container = 'module-recommendations-recommended-for-you'; -- 26,416, irex v2 rerun = 465,164
 */
 
 -- Counts - all modules
@@ -237,10 +192,11 @@ GROUP BY dt, platform,container, age_range
 ---------------------------------------- Step 3: Identify all the clicks to content ---------------------------------------
 
 -- Need to identify all the clicks to content and link them to the ixpl-start flag.
--- Need all the clicks, not just from homepage, to make sure a click from homepage is not incorrectly linked to (for exmaple) content autoplaying.
+-- Need all the clicks, not just from homepage, to make sure a click from homepage is not incorrectly linked to (for example) content autoplaying.
 -- Need to eliminate clicks from the TLEO because these are a middle step from homepage.
 
--- For the recommended module we need to know what recommendation group the content was in - this comes in the user_experience field.
+-- For the recommended module we need to know what recommendation group the content was in  i.e Think or irex - this comes in the user_experience field.
+-- in most cases (i.e not rec-module) this field will be blank
 
 -- All standard clicks
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_content_clicks;
@@ -481,11 +437,10 @@ SELECT *, row_number() over (PARTITION BY dt,unique_visitor_cookie_id,bbc_hid3, 
 FROM central_insights_sandbox.vb_exp_clicks_and_starts_temp
 ORDER BY dt, unique_visitor_cookie_id, bbc_hid3, visit_id, event_position;
 
---SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts  WHERE think_group IS NOT NULL LIMIT 5;
 -- Join the table back on itself to match the content click to the ixpl start by the content_id.
 -- For categories and channels the click ID is often unknown so need to create one master table so the click event before ixpl start can be taken in these cases
 -- If that's ever fixed then can simply join play starts with clicks
--- The clicks and start flags are split into two temp tables for ease of code. Can't just join the two original tables because we need the row count for when the content_id is unknown.
+-- The clicks and start flags are split into two temp tables for ease of reading code. Can't just join the two original tables because we need the row count for when the content_id is unknown.
 DROP TABLE IF EXISTS vb_temp_starts;
 DROP TABLE IF EXISTS vb_temp_clicks;
 CREATE TEMP TABLE vb_temp_starts AS SELECT * FROM central_insights_sandbox.vb_exp_clicks_and_starts WHERE attribute = 'iplxp-ep-started';
@@ -553,7 +508,6 @@ ORDER BY dt, bbc_hid3, visit_id, content_start_event_position;
 -- Update table so duplicate joins have the ixpl-ep-started label set to null.
 -- If two clicks are joined to the same start, make null the record for row with the largest content_start_diff as this is an incorrect join.
 -- This retains both clicks and just the one start
-
 UPDATE central_insights_sandbox.vb_exp_clicks_linked_starts_valid_temp
 SET content_container = NULL,
     content_attribute = 'no-start-flag',
@@ -579,6 +533,7 @@ SET content_attribute = (CASE
                              ELSE content_attribute END);
 
 
+-- simplify table
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_starts;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_starts AS
 SELECT dt,
@@ -690,7 +645,7 @@ SET watched_flag = (CASE
                         WHEN watched_flag IS NULL THEN 'no-watched-flag'
                         ELSE watched_flag END);
 
-
+-- enrich with the data about users e.g age
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
 CREATE TABLE central_insights_sandbox.vb_exp_valid_watched_enriched AS
 SELECT a.dt,
@@ -719,6 +674,9 @@ FROM central_insights_sandbox.vb_exp_valid_watched a
          LEFT JOIN central_insights_sandbox.vb_rec_exp_ids_hid b
                    ON a.dt = b.dt AND a.bbc_hid3 = b.bbc_hid3 AND a.visit_id = b.visit_id
 ;
+
+-- This table ONLY contains people where content and clicks were identified.
+-- There will be visits where nothing happened so this table will have fewer hids than the hid table.
 
 -- Final table (labelled with exp name)
 DROP TABLE IF EXISTS central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2_repeat;
@@ -775,18 +733,7 @@ DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched;
 DROP TABLE IF EXISTS central_insights_sandbox.vb_exp_valid_watched_enriched;
 -------- End of delete
 
---- Exp v1
-SELECT * FROM central_insights_sandbox.vb_rec_exp_final_plxp_irex1_model1_1;
-CREATE TABLE vb_exp_hids_v1 AS SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid;
 
-
--- EXP v2
-DROP TABLE IF EXISTS vb_exp_hids_v2;
-CREATE TABLE vb_exp_hids_v2 AS SELECT * FROM central_insights_sandbox.vb_rec_exp_ids_hid;
-SELECT * FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2 LIMIT 10;
-
-SELECT dt, platform, exp_group, count(visit_id) as num_visits FROM vb_exp_hids_v2 GROUP BY 1,2,3 ORDER BY 1,2,3;
-SELECT dt, platform, exp_group, count(visit_id) as num_visits FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2 GROUP BY 1,2,3 ORDER BY 1,2,3;
 
 ------------------------------------------------------------ Look at results ------------------------------------------------------------
 --- Make current exp table into generic name for ease
@@ -802,40 +749,45 @@ GROUP BY 1
 ORDER BY 1;
 
 
-
 SELECT platform, exp_group, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
 FROM central_insights_sandbox.vb_rec_exp_final
 --FROM central_insights_sandbox.vb_rec_exp_ids_hid
 GROUP BY 1,2;
 
---SELECT * FROM central_insights_sandbox.vb_exp_valid_watched_enriched LIMIT 100;
-
-SELECT
-       --a.platform,
-       a.exp_group,
-       num_hids AS num_signed_in_users,
-       num_visits,
-       num_starts,
-       num_watched,
-       num_clicks_to_module
-FROM (SELECT
+with user_stats AS (
+    -- get the number of users and visits for everyone in the experiment
+    SELECT
+        --platform,
+        exp_group,
+        count(distinct bbc_hid3)                   as num_hids,
+        count(distinct unique_visitor_cookie_id)   as num_uv,
+        count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+    FROM central_insights_sandbox.vb_rec_exp_ids_hid
+    GROUP BY 1
+),
+     module_stats AS (
+         -- Get the number of clicks and starts/watched from each module on homepage
+         SELECT
              --platform,
              exp_group,
-             count(distinct bbc_hid3)                   as num_hids,
-             count(distinct unique_visitor_cookie_id)   as num_uv,
-             count(distinct dt || bbc_hid3 || visit_id) AS num_visits
-      FROM central_insights_sandbox.vb_rec_exp_ids_hid
-      GROUP BY 1) a
-         JOIN (SELECT
-                      --platform,
-                      exp_group,
-                      sum(start_flag)   AS num_starts,
-                      sum(watched_flag) as num_watched,
-                      count(visit_id)   AS num_clicks_to_module
-               FROM central_insights_sandbox.vb_rec_exp_final
-               WHERE click_placement = 'iplayer.tv.page' --homepage
-                 AND click_container = 'module-recommendations-recommended-for-you'
-               GROUP BY 1) b ON a.exp_group = b.exp_group --AND a.platform = b.platform
+             sum(start_flag)   AS num_starts,
+             sum(watched_flag) as num_watched,
+             count(visit_id)   AS num_clicks_to_module
+         FROM central_insights_sandbox.vb_rec_exp_final
+         WHERE click_placement = 'iplayer.tv.page' --homepage
+           AND click_container = 'module-recommendations-recommended-for-you'
+         GROUP BY 1
+     )
+SELECT
+    --a.platform,
+    a.exp_group,
+    num_hids AS num_signed_in_users,
+    num_visits,
+    num_starts,
+    num_watched,
+    num_clicks_to_module
+FROM user_stats a
+         JOIN module_stats b ON a.exp_group = b.exp_group --AND a.platform = b.platform
 ORDER BY --a.platform,
          a.exp_group;
 
@@ -863,16 +815,19 @@ ORDER BY 1;
 
 SELECT distinct click_container FROM central_insights_sandbox.vb_rec_exp_final WHERE click_placement = 'iplayer.tv.page';
 
----------- Data for R analysis --------------
+---------- Data for R Statistical Analysis --------------
 DROP TABLE IF EXISTS vb_rec_exp_results;
 CREATE TABLE vb_rec_exp_results AS
-with module_metrics AS (SELECT exp_group,
-                               bbc_hid3,
-                               sum(start_flag) AS num_starts, sum(watched_flag) as num_watched
-                        FROM central_insights_sandbox.vb_rec_exp_final
-                        WHERE click_container = 'module-recommendations-recommended-for-you'
-                          AND click_placement = 'iplayer.tv.page'
-                        GROUP BY 1, 2)
+with module_metrics AS (
+    SELECT exp_group,
+           bbc_hid3,
+           sum(start_flag)   AS num_starts,
+           sum(watched_flag) as num_watched
+    FROM central_insights_sandbox.vb_rec_exp_final
+    WHERE click_container = 'module-recommendations-recommended-for-you'
+      AND click_placement = 'iplayer.tv.page'
+    GROUP BY 1, 2
+)
 SELECT DISTINCT a.exp_group,
                 a.bbc_hid3,
                 a.frequency_band,
@@ -884,13 +839,6 @@ FROM central_insights_sandbox.vb_rec_exp_ids_hid a -- get all users, even those 
                    on a.bbc_hid3 = b.bbc_hid3 AND a.exp_group = b.exp_group
 ;
 
-
-SELECT exp_group,
-       frequency_band,
-       sum(num_starts)  as total_starts,
-       sum(num_watched) as total_watched
-FROM vb_rec_exp_results
-GROUP BY 1, 2;
 
 -- Tables for R
 --control
