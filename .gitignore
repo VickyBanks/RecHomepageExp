@@ -42,3 +42,4 @@ vignettes/*.pdf
 *.png
 *.R
 *.DS_Store
+*.Rproj
