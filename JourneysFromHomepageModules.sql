@@ -906,9 +906,9 @@ with module_metrics AS (
            sum(start_flag)   AS num_starts,
            sum(watched_flag) as num_watched
     FROM central_insights_sandbox.vb_rec_exp_final
-    WHERE --click_container = 'module-recommendations-recommended-for-you'
+    --WHERE --click_container = 'module-recommendations-recommended-for-you'
       --AND
-          click_placement = 'iplayer.tv.page'
+          --click_placement = 'iplayer.tv.page'
     GROUP BY 1, 2,3
 )
 SELECT DISTINCT a.exp_group,
@@ -965,4 +965,42 @@ with module_metrics AS (
 SELECT click_think_group, count(bbc_hid3) as num_clicks, sum(num_starts) as num_starts, sum(num_watched) as num_watched
 FROM user_stats
 GROUP BY 1;
+;
+
+-- Whole product
+with user_stats AS (
+    -- get the number of users and visits for everyone in the experiment
+    SELECT
+        platform,
+        exp_group,
+        count(distinct bbc_hid3)                   as num_hids,
+        count(distinct unique_visitor_cookie_id)   as num_uv,
+        count(distinct dt || bbc_hid3 || visit_id) AS num_visits
+    FROM central_insights_sandbox.vb_rec_exp_ids_hid
+    GROUP BY 1,2
+),
+     module_stats AS (
+         -- Get the number of clicks and starts/watched from each module on homepage
+         SELECT
+             platform,
+             exp_group,
+             sum(start_flag)   AS num_starts,
+             sum(watched_flag) as num_watched,
+             count(visit_id)   AS num_clicks
+         FROM central_insights_sandbox.vb_rec_exp_final
+         GROUP BY 1,2
+     )
+SELECT
+    a.platform,
+   a.exp_group,
+    num_hids AS num_signed_in_users,
+    num_visits,
+    num_starts,
+    num_watched,
+    num_clicks
+FROM user_stats a
+         JOIN module_stats b ON a.exp_group = b.exp_group AND
+        a.platform = b.platform
+ORDER BY a.platform,
+         a.exp_group
 ;
