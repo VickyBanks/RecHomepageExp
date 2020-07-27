@@ -762,10 +762,10 @@ SELECT * FROM central_insights_sandbox.vb_rec_exp_final_iplxp_irex_model1_2_repe
 
 SELECT * FROM central_insights_sandbox.vb_rec_exp_final LIMIT 10;
 
-SELECT frequency_band, count(DISTINCT dt||visit_id)
+SELECT frequency_band, frequency_group_aggregated, count(DISTINCT dt||visit_id) as num_visits, count(distinct bbc_hid3) as num_signed_in_users
 FROM central_insights_sandbox.vb_rec_exp_final
-GROUP BY 1
-ORDER BY 1;
+GROUP BY 1,2
+ORDER BY 1,2;
 
 
 SELECT platform, exp_group, count(distinct bbc_hid3) AS num_users, count(distinct visit_id) AS num_visits
@@ -789,6 +789,7 @@ with user_stats AS (
         count(distinct unique_visitor_cookie_id)   as num_uv,
         count(distinct dt || bbc_hid3 || visit_id) AS num_visits
     FROM central_insights_sandbox.vb_rec_exp_ids_hid
+
     GROUP BY 1,2
 ),
      module_stats AS (
@@ -801,12 +802,12 @@ with user_stats AS (
              count(visit_id)   AS num_clicks_to_module
          FROM central_insights_sandbox.vb_rec_exp_final
          WHERE click_placement = 'iplayer.tv.page' --homepage
-           AND click_container != 'module-recommendations-recommended-for-you'
+           AND click_container = 'module-recommendations-recommended-for-you'
          GROUP BY 1,2
      )
 SELECT
     a.platform,
-   a.exp_group,
+    a.exp_group,
     num_hids AS num_signed_in_users,
     num_visits,
     num_starts,
@@ -863,14 +864,13 @@ ORDER BY a.platform,
 ;
 
 -------- Impressions ---------
-SELECT a.platform, exp_group, b.age_range, count(DISTINCT a.visit_id) AS num_visits_saw_module
+SELECT a.platform, exp_group, count(DISTINCT a.visit_id) AS num_visits_saw_module
 FROM central_insights_sandbox.vb_module_impressions a
          JOIN central_insights_sandbox.vb_rec_exp_final b
               ON a.dt = b.dt AND a.visit_id = b.visit_id AND a.platform = b.platform and a.bbc_hid3 = b.bbc_hid3
 WHERE container = 'module-recommendations-recommended-for-you'
-  AND b.age_range != 'under 10'
-GROUP BY 1, 2, 3
-ORDER BY 1,2,3
+GROUP BY 1, 2
+ORDER BY 1,2
 ;
 
 
@@ -906,9 +906,8 @@ with module_metrics AS (
            sum(start_flag)   AS num_starts,
            sum(watched_flag) as num_watched
     FROM central_insights_sandbox.vb_rec_exp_final
-    --WHERE --click_container = 'module-recommendations-recommended-for-you'
-      --AND
-          --click_placement = 'iplayer.tv.page'
+    WHERE click_container = 'module-recommendations-recommended-for-you'
+      AND click_placement = 'iplayer.tv.page'
     GROUP BY 1, 2,3
 )
 SELECT DISTINCT a.exp_group,
